@@ -28,7 +28,13 @@ def plot_phase4_ablations():
         try:
             df = pd.read_csv(filepath)
             if 'episode' in df.columns and 'avg_reward' in df.columns:
-                plt.plot(df['episode'], df['avg_reward'], label=name, color=colors[name], linewidth=2)
+                # Plot raw data with low alpha (transparency)
+                plt.plot(df['episode'], df['avg_reward'], color=colors[name], alpha=0.2, linewidth=1)
+                
+                # Plot smoothed moving average for clearer trends
+                window_size = 5
+                smoothed = df['avg_reward'].rolling(window=window_size, min_periods=1).mean()
+                plt.plot(df['episode'], smoothed, label=f"{name} (MA={window_size})", color=colors[name], linewidth=2.5)
         except FileNotFoundError:
             print(f"Warning: {filepath} not found. Skipping {name}.")
 

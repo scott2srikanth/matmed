@@ -45,7 +45,10 @@ def load_pretrained_runner(
         seed=seed,
         use_chemberta=False,
         use_vision=True,       # Phase 4 keeps vision
-        uncertainty_lambda=0.1
+        uncertainty_lambda=0.1,
+        lr_policy=5e-5,        # Slower RL learning rate for smoother curve
+        entropy_coeff=0.05,    # Higher entropy to prevent policy collapse into guessing
+        ppo_clip=0.25          # Slightly looser clipping
     )
     
     # Load weights

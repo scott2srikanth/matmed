@@ -257,7 +257,7 @@ class MATMEDRunner:
 
         self.policy_optim.zero_grad()
         loss_dict['total_loss'].backward()
-        nn.utils.clip_grad_norm_(self.p_agent.parameters(), max_norm=0.5)
+        nn.utils.clip_grad_norm_(self.p_agent.parameters(), max_norm=1.0)
         self.policy_optim.step()
 
         return {k: float(v.item()) for k, v in loss_dict.items()}
