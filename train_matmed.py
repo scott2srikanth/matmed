@@ -104,7 +104,7 @@ class MATMEDRunner:
         self.tokenizer = SMILESTokenizer()
 
         self.g_agent = GeneratorAgent(tokenizer=self.tokenizer).to(device)
-        self.e_agent = EvaluatorAgent().to(device)
+        self.e_agent = EvaluatorAgent(num_layers=4).to(device)
         self.s_agent = SafetyAgent(use_chemberta=use_chemberta).to(device)
         self.r_agent = ReactionAgent(
             use_vision=use_vision,
