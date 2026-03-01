@@ -87,7 +87,7 @@ def pretrain_s_agent(
             emb, _ = self.encoder(x)
             return self.tox_head(emb)
             
-    base_sa = SafetyAgent(use_chemberta=False, embed_dim=256, num_layers=4).to(device)
+    base_sa = SafetyAgent(use_chemberta=False, d_model=256).to(device)
     model = Tox21SafetyModel(base_sa).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)

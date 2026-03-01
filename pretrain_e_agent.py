@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader, Dataset
 import numpy as np
 
 from utils import get_logger, set_seed
-from evaluator_agent import EvaluatorAgent, smile_to_graph
+from evaluator_agent import EvaluatorAgent, smiles_to_graph
 from data_utils import load_bindingdb_sample
 
 logger = get_logger('E-Agent Pretrain')
@@ -21,7 +21,7 @@ class BindingDataset(Dataset):
     def __init__(self, data_tuples: list):
         self.data = []
         for smi, pic50 in data_tuples:
-            g = smile_to_graph(smi)
+            g = smiles_to_graph(smi)
             if g is not None:
                 self.data.append((g, float(pic50)))
                 
