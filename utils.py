@@ -32,7 +32,7 @@ RDLogger.DisableLog('rdApp.*')
 def get_zinc_sample(n: int = 10) -> List[str]:
     """
     Return a sample of ZINC SMILES strings.
-    If n > 100, attempts to download a subset of `zpn/zinc250k` from HuggingFace.
+    If n > 100, attempts to download a subset of `liuganghuggingface/zinc250k` from HuggingFace.
     Fallback to a local dummy list if the download fails or n <= 100.
     """
     if n > 100:
@@ -40,7 +40,7 @@ def get_zinc_sample(n: int = 10) -> List[str]:
             from datasets import load_dataset # type: ignore
             # Load the zinc dataset (often structured with a 'smiles' column)
             print(f"Downloading {n} ZINC SMILES from HuggingFace...")
-            dataset = load_dataset("zpn/zinc250k", split="train")
+            dataset = load_dataset("liuganghuggingface/zinc250k", split="train")
             smiles_col = "smiles" if "smiles" in dataset.column_names else dataset.column_names[0]
             
             # Extract and shuffle slightly
