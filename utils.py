@@ -32,25 +32,44 @@ RDLogger.DisableLog('rdApp.*')
 def get_zinc_sample(n: int = 10) -> List[str]:
     """
     Return a sample of ZINC SMILES strings.
-    If n > 100, attempts to download a subset of `liuganghuggingface/zinc250k` from HuggingFace.
+    If n > 100, attempts to download a subset of `basu369victor/zinc250k` via KaggleHub.
     Fallback to a local dummy list if the download fails or n <= 100.
     """
     if n > 100:
         try:
-            from datasets import load_dataset # type: ignore
-            # Load the zinc dataset (often structured with a 'smiles' column)
-            print(f"Downloading {n} ZINC SMILES from HuggingFace...")
-            dataset = load_dataset("liuganghuggingface/zinc250k", split="train")
-            smiles_col = "smiles" if "smiles" in dataset.column_names else dataset.column_names[0]
+            import kagglehub # type: ignore
+            from kagglehub import KaggleDatasetAdapter # type: ignore
+            import pandas as pd
             
-            # Extract and shuffle slightly
-            all_smiles = dataset[smiles_col]
+            print(f"Downloading {n} ZINC SMILES from KaggleHub...")
+            
+            # The file path inside the kaggle dataset
+            file_path = "250k_rndm_zinc_drugs_clean_3.csv"
+            
+            df = kagglehub.load_dataset(
+                KaggleDatasetAdapter.PANDAS,
+                "basu369victor/zinc250k",
+                file_path,
+            )
+            
+            # Look for common SMILES column names
+            smiles_col = "smiles"
+            for col in df.columns:
+                if "smiles" in col.lower() or "smi" == col.lower():
+                    smiles_col = col
+                    break
+                    
+            if smiles_col not in df.columns:
+                smiles_col = df.columns[0]
+                
+            all_smiles = df[smiles_col].dropna().tolist()
             random.shuffle(all_smiles)
             return all_smiles[:n]
+            
         except ImportError:
-            print("Warning: `datasets` library not found. Run `pip install datasets` to download ZINC. Using dummy data instead.")
+            print("Warning: `kagglehub[pandas-datasets]` library not found. Run `pip install \"kagglehub[pandas-datasets]\"` to download ZINC. Using dummy data instead.")
         except Exception as e:
-            print(f"Failed to download ZINC: {e}. Using dummy data instead.")
+            print(f"Failed to download ZINC via KaggleHub: {e}. Using dummy data instead.")
 
     # A small set of valid SMILES strings (many from ZINC/ChEMBL)
     sample_smiles = [
