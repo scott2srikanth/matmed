@@ -31,9 +31,27 @@ RDLogger.DisableLog('rdApp.*')
 
 def get_zinc_sample(n: int = 10) -> List[str]:
     """
-    Return a small dummy sample of ZINC SMILES strings for prototyping.
-    In a real scenario, this would load from a downloaded ZINC dataset.
+    Return a sample of ZINC SMILES strings.
+    If n > 100, attempts to download a subset of `zpn/zinc250k` from HuggingFace.
+    Fallback to a local dummy list if the download fails or n <= 100.
     """
+    if n > 100:
+        try:
+            from datasets import load_dataset # type: ignore
+            # Load the zinc dataset (often structured with a 'smiles' column)
+            print(f"Downloading {n} ZINC SMILES from HuggingFace...")
+            dataset = load_dataset("zpn/zinc250k", split="train")
+            smiles_col = "smiles" if "smiles" in dataset.column_names else dataset.column_names[0]
+            
+            # Extract and shuffle slightly
+            all_smiles = dataset[smiles_col]
+            random.shuffle(all_smiles)
+            return all_smiles[:n]
+        except ImportError:
+            print("Warning: `datasets` library not found. Run `pip install datasets` to download ZINC. Using dummy data instead.")
+        except Exception as e:
+            print(f"Failed to download ZINC: {e}. Using dummy data instead.")
+
     # A small set of valid SMILES strings (many from ZINC/ChEMBL)
     sample_smiles = [
         "CC(=O)Oc1ccccc1C(=O)O",          # Aspirin
@@ -47,7 +65,6 @@ def get_zinc_sample(n: int = 10) -> List[str]:
         "C1=CC=C(C=C1)O",                  # Phenol
         "CC(C)CC1=CC=C(C=C1)C(C)C(=O)O"    # Ibuprofen
     ]
-    # If more are requested, just cycle through them
     result = []
     while len(result) < n:
         result.extend(sample_smiles)
