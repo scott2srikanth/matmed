@@ -20,6 +20,10 @@ import numpy as np
 import torch
 from rdkit import Chem
 from rdkit.Chem import Descriptors, rdMolDescriptors, DataStructs, AllChem
+from rdkit import RDLogger
+
+# Suppress RDKit C++ warnings/errors for invalid SMILES
+RDLogger.DisableLog('rdApp.*')
 
 # ─────────────────────────────────────────────────────────────
 # Reproducibility & Data
