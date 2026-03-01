@@ -41,19 +41,19 @@ def run_ablation(experiment_name: str, reward_cfg: RewardConfig, epochs: int = 5
 
 
 if __name__ == '__main__':
-    # 1. Background downloads 200 ZINC samples to pretrain internally
-    zinc_subset = get_zinc_sample(200)
+    # 1. Background downloads 2000 ZINC samples to pretrain internally
+    zinc_subset = get_zinc_sample(2000)
 
     # Experiment A: Full MATMED
     reward_full = RewardConfig(alpha=1.0, beta=1.0, gamma=1.0, delta=1.0)
-    run_ablation("Full_MATMED", reward_full, epochs=5, steps=30)
+    run_ablation("Full_MATMED", reward_full, epochs=20, steps=30)
 
     # Experiment B: No Safety Agent (delta=0.0)
     # The P-Agent still sees the toxicity embedding, but the reward doesn't penalize it!
     reward_no_safety = RewardConfig(alpha=1.0, beta=1.0, gamma=1.0, delta=0.0)
-    run_ablation("No_SAgent", reward_no_safety, epochs=5, steps=30)
+    run_ablation("No_SAgent", reward_no_safety, epochs=20, steps=30)
 
     # Experiment C: No Reaction Agent (beta=0.0)
     # High binding but completely unsynthesizable molecules should emerge.
     reward_no_yield = RewardConfig(alpha=1.0, beta=0.0, gamma=1.0, delta=1.0)
-    run_ablation("No_RAgent", reward_no_yield, epochs=5, steps=30)
+    run_ablation("No_RAgent", reward_no_yield, epochs=20, steps=30)
