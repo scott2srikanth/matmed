@@ -67,10 +67,15 @@ def run_one(name: str, cfg: dict, seed: int) -> pd.DataFrame:
         ppo_clip=0.25,
     )
 
-    # Load the pretrained checkpoint if it exists (best effort)
+    # Load the pretrained checkpoint if it exists (best effort, strict=False to skip arch mismatches)
     def _try_load(model, path):
         if os.path.exists(path):
-            model.load_state_dict(torch.load(path, map_location=device))
+            state = torch.load(path, map_location=device)
+            missing, unexpected = model.load_state_dict(state, strict=False)
+            if missing:
+                logger.warning(f"  ⚠ {path}: missing keys: {len(missing)}")
+            if unexpected:
+                logger.warning(f"  ⚠ {path}: unexpected keys: {len(unexpected)}")
             model.eval()
             for p in model.parameters():
                 p.requires_grad = False
