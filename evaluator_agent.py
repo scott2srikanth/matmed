@@ -283,7 +283,6 @@ class EvaluatorAgent(nn.Module):
             embedding = h.mean(dim=0).unsqueeze(0)  # (1, hidden_dim)
         else:
             # Batched graphs: scatter mean pooling
-            from torch_scatter import scatter_mean  # Fallback manual scatter if missing
             try:
                 from torch_scatter import scatter_mean
                 embedding = scatter_mean(h, batch_idx, dim=0)  # (batch_size, hidden_dim)
