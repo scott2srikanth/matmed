@@ -44,7 +44,7 @@ def load_pretrained_runner(
         num_pretrain_epochs=0, # Skipping phase 2 generic pretrain!
         seed=seed,
         use_chemberta=False,
-        use_vision=True,       # Phase 4 keeps vision
+        use_vision=not ablation_config.get('no_vision', False),
         uncertainty_lambda=0.1,
         lr_policy=5e-5,        # Slower RL learning rate for smoother curve
         entropy_coeff=0.05,    # Higher entropy to prevent policy collapse into guessing
@@ -125,7 +125,8 @@ if __name__ == '__main__':
         "Full MATMED":        {},
         "No Safety Agent":    {"no_safety": True},
         "No Reaction Agent":  {"no_reaction": True},
-        "No Binding Agent":   {"no_binding": True}
+        "No Binding Agent":   {"no_binding": True},
+        "No Vision Agent":    {"no_vision": True}
     }
     
     results = {}

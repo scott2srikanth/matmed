@@ -12,14 +12,16 @@ def plot_phase4_ablations():
         'Full MATMED':        'phase4_metrics_full_matmed.csv',
         'No Safety Agent':    'phase4_metrics_no_safety_agent.csv',
         'No Reaction Agent':  'phase4_metrics_no_reaction_agent.csv',
-        'No Binding Agent':   'phase4_metrics_no_binding_agent.csv'
+        'No Binding Agent':   'phase4_metrics_no_binding_agent.csv',
+        'No Vision Agent':    'phase4_metrics_no_vision_agent.csv'
     }
 
     colors = {
         'Full MATMED':        'steelblue',
         'No Safety Agent':    'tomato',
         'No Reaction Agent':  'darkorange',
-        'No Binding Agent':   'mediumseagreen'
+        'No Binding Agent':   'mediumseagreen',
+        'No Vision Agent':    'purple'
     }
 
     plt.figure(figsize=(10, 6))
