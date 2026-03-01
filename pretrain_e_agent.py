@@ -39,10 +39,35 @@ class BindingDataset(Dataset):
         return self.data[idx]
 
 def collate_graphs(batch):
-    from torch_geometric.data import Batch
-    graphs = [item[0] for item in batch]
-    labels = torch.tensor([item[1] for item in batch], dtype=torch.float32)
-    return Batch.from_data_list(graphs), labels
+    # batch is list of (dict, label)
+    x_list, edge_index_list, edge_attr_list, labels_list = [], [], [], []
+    node_offset = 0
+    
+    for item in batch:
+        g, label = item
+        num_nodes = g['x'].size(0)
+        
+        x_list.append(g['x'])
+        # shift edge indices by the number of nodes already in the batch
+        shifted_edge_index = g['edge_index'] + node_offset
+        edge_index_list.append(shifted_edge_index)
+        edge_attr_list.append(g['edge_attr'])
+        labels_list.append(label)
+        
+        node_offset += num_nodes
+        
+    batched_x = torch.cat(x_list, dim=0)
+    batched_edge_index = torch.cat(edge_index_list, dim=1)
+    batched_edge_attr = torch.cat(edge_attr_list, dim=0)
+    batched_labels = torch.tensor(labels_list, dtype=torch.float32)
+    
+    batched_g = {
+        'x': batched_x,
+        'edge_index': batched_edge_index,
+        'edge_attr': batched_edge_attr
+    }
+    
+    return batched_g, batched_labels
 
 def pretrain_e_agent(
     num_epochs: int = 15,
@@ -86,9 +111,11 @@ def pretrain_e_agent(
         model.train()
         train_loss = 0.0
         for batch_g, batch_y in train_loader:
-            batch_g, batch_y = batch_g.to(device), batch_y.to(device)
+            batch_g = {k: v.to(device) for k, v in batch_g.items()}
+            batch_y = batch_y.to(device)
             optimizer.zero_grad()
-            pred = model(batch_g).squeeze(-1)
+            pred, _ = model.forward_graph(batch_g['x'], batch_g['edge_index'], batch_g['edge_attr'])
+            pred = pred.squeeze(-1)
             loss = criterion(pred, batch_y)
             loss.backward()
             optimizer.step()
@@ -101,8 +128,10 @@ def pretrain_e_agent(
         val_loss = 0.0
         with torch.no_grad():
             for batch_g, batch_y in val_loader:
-                batch_g, batch_y = batch_g.to(device), batch_y.to(device)
-                pred = model(batch_g).squeeze(-1)
+                batch_g = {k: v.to(device) for k, v in batch_g.items()}
+                batch_y = batch_y.to(device)
+                pred, _ = model.forward_graph(batch_g['x'], batch_g['edge_index'], batch_g['edge_attr'])
+                pred = pred.squeeze(-1)
                 val_loss += criterion(pred, batch_y).item()
         val_loss /= len(val_loader)
         
@@ -115,8 +144,10 @@ def pretrain_e_agent(
             preds, trues = [], []
             with torch.no_grad():
                 for batch_g, batch_y in test_loader:
-                    batch_g, batch_y = batch_g.to(device), batch_y.to(device)
-                    pred = model(batch_g).squeeze(-1)
+                    batch_g = {k: v.to(device) for k, v in batch_g.items()}
+                    batch_y = batch_y.to(device)
+                    pred, _ = model.forward_graph(batch_g['x'], batch_g['edge_index'], batch_g['edge_attr'])
+                    pred = pred.squeeze(-1)
                     test_loss += criterion(pred, batch_y).item()
                     preds.append(pred.cpu().numpy())
                     trues.append(batch_y.cpu().numpy())
