@@ -119,8 +119,7 @@ def pretrain_e_agent(
             batch_y = batch_y.to(device)
             optimizer.zero_grad()
             pred, _ = model.forward_graph(batch_g['x'], batch_g['edge_index'], batch_g['edge_attr'], batch_g['batch_idx'])
-            pred = pred.squeeze(-1)
-            loss = criterion(pred, batch_y)
+            loss = criterion(pred, batch_y.unsqueeze(1))
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
@@ -135,8 +134,7 @@ def pretrain_e_agent(
                 batch_g = {k: v.to(device) for k, v in batch_g.items()}
                 batch_y = batch_y.to(device)
                 pred, _ = model.forward_graph(batch_g['x'], batch_g['edge_index'], batch_g['edge_attr'], batch_g['batch_idx'])
-                pred = pred.squeeze(-1)
-                val_loss += criterion(pred, batch_y).item()
+                val_loss += criterion(pred, batch_y.unsqueeze(1)).item()
         val_loss /= len(val_loader)
         
         logger.info(f"Epoch {epoch:2d}/{num_epochs} | Train MSE: {train_loss:.4f} | Val MSE: {val_loss:.4f}")
@@ -151,10 +149,9 @@ def pretrain_e_agent(
                     batch_g = {k: v.to(device) for k, v in batch_g.items()}
                     batch_y = batch_y.to(device)
                     pred, _ = model.forward_graph(batch_g['x'], batch_g['edge_index'], batch_g['edge_attr'], batch_g['batch_idx'])
-                    pred = pred.squeeze(-1)
-                    test_loss += criterion(pred, batch_y).item()
-                    preds.append(pred.cpu().numpy())
-                    trues.append(batch_y.cpu().numpy())
+                    test_loss += criterion(pred, batch_y.unsqueeze(1)).item()
+                    preds.append(pred.detach().cpu().numpy())
+                    trues.append(batch_y.unsqueeze(1).cpu().numpy())
             
             test_loss /= len(test_loader) if len(test_loader) > 0 else 1 # Handle empty test_loader
             if len(preds) == 0:
