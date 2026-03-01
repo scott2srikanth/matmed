@@ -84,7 +84,7 @@ def pretrain_s_agent(
             )
             
         def forward(self, x):
-            emb, _ = self.encoder(x)
+            emb = self.encoder(x)
             return self.tox_head(emb)
             
     base_sa = SafetyAgent(use_chemberta=False, d_model=256).to(device)

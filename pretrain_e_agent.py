@@ -71,10 +71,9 @@ def pretrain_e_agent(
 
     # 2. Init Model (max 4 layers, 128 dim from prompt)
     model = EvaluatorAgent(
-        node_in_dim=35,
         hidden_dim=128,
         num_layers=4,
-        num_heads=4
+        nhead=4
     ).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
