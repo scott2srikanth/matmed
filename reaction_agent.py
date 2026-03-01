@@ -1,23 +1,19 @@
 """
-reaction_agent.py — R-Agent: Reaction Feasibility Predictor
-=============================================================
-Predicts the synthetic feasibility (yield score) of a candidate molecule.
+reaction_agent.py — R-Agent: Reaction Feasibility Predictor (Phase 3)
+======================================================================
+Phase 3 Upgrade: Now integrates vision embeddings from VisionTemporalTransformer
+via cross-attention to improve yield prediction.
 
-Scientific rationale:
-  A molecule may bind a target strongly but be practically unsynthesisable.
-  The Synthetic Accessibility (SA) score (Ertl & Schuffenhauer, 2009)
-  quantifies how easily a compound can be made in a lab.  Combined with
-  molecular weight and logP, these physicochemical descriptors form a
-  heuristic proxy for reaction yield — sufficient for an RL prototype where
-  no actual lab data is available.
+Original heuristic yield:
+  raw_yield = w_sa   * (1 - normalised(SA_score))
+            + w_mw   * heaviside(MolWt, 500)
+            + w_logP * gaussian(logP, centre=2.5)
 
-Heuristic yield formula:
-  raw_yield = w_sa   * (1 - normalised(SA_score))   # SA in [1,10] → invert
-            + w_mw   * heaviside(MolWt, 500)          # penalise heavy molecules
-            + w_logP * gaussian(logP, centre=2.5)      # prefer logP ≈ 2.5
-
-These raw features are passed through a small MLP (optionally a tiny
-Transformer) to allow learned nonlinear combinations.
+Phase 3 Enhancement:
+  The molecular embedding from the MLP encoder attends (as Query) to the
+  vision embedding from VisionTemporalTransformer (as Key and Value).
+  This allows the yield predictor to incorporate dynamic, time-dependent signals
+  alongside the static physicochemical descriptors.
 
 Output:
   - yield_score : float ∈ [0, 1]
@@ -43,7 +39,6 @@ logger = get_logger('R-Agent')
 # RDKit descriptor computation
 # ─────────────────────────────────────────────────────────────────────────────
 
-# SA_score sub-module (rdkit contrib) — graceful fallback
 def _compute_sa_score(mol) -> float:
     """Compute Synthetic Accessibility score; fallback to neutral 5.0."""
     try:
@@ -53,7 +48,6 @@ def _compute_sa_score(mol) -> float:
         pass
     try:
         from rdkit.Chem import rdMolDescriptors
-        # Rough proxy: use HeavyAtomCount normalised
         return min(10.0, 1.0 + mol.GetNumHeavyAtoms() / 10.0)
     except Exception:
         return 5.0
@@ -64,12 +58,9 @@ def compute_reaction_features(smiles: str) -> Optional[np.ndarray]:
     Compute a 3-dimensional feature vector from physicochemical descriptors.
 
     Features (all normalised to approximately [0, 1]):
-      [0] norm_sa : 1 - (SA_score - 1) / 9   (higher = easier synthesis)
-      [1] norm_mw : exp(-MolWt / 500)          (higher = lighter molecule)
-      [2] norm_lp : exp(-(logP - 2.5)^2 / 4)  (higher = closer to ideal logP)
-
-    Args:
-        smiles: Valid SMILES string.
+      [0] norm_sa : 1 - (SA_score - 1) / 9
+      [1] norm_mw : exp(-MolWt / 500)
+      [2] norm_lp : exp(-(logP - 2.5)^2 / 4)
 
     Returns:
         (3,) numpy array or None if SMILES is invalid.
@@ -82,9 +73,9 @@ def compute_reaction_features(smiles: str) -> Optional[np.ndarray]:
     mw   = Descriptors.MolWt(mol)
     logp = Descriptors.MolLogP(mol)
 
-    norm_sa = 1.0 - (sa - 1.0) / 9.0          # SA ∈ [1,10] → [0,1]
-    norm_mw = math.exp(-mw / 500.0)            # lighter → higher score
-    norm_lp = math.exp(-((logp - 2.5) ** 2) / 4.0)  # Lipophilicity preference
+    norm_sa = 1.0 - (sa - 1.0) / 9.0
+    norm_mw = math.exp(-mw / 500.0)
+    norm_lp = math.exp(-((logp - 2.5) ** 2) / 4.0)
 
     return np.array([norm_sa, norm_mw, norm_lp], dtype=np.float32)
 
@@ -93,23 +84,57 @@ REACTION_FEAT_DIM = 3
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# MLP Reaction Agent
+# Cross-Attention Fusion Module
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CrossAttentionFusion(nn.Module):
+    """
+    Fuses a molecular embedding (query) with a vision embedding (key/value)
+    via multi-head cross-attention, producing an enriched fused embedding.
+    """
+
+    def __init__(self, embed_dim: int = 128, num_heads: int = 4, dropout: float = 0.1):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.norm = nn.LayerNorm(embed_dim)
+
+    def forward(
+        self,
+        mol_emb: torch.Tensor,      # (B, D)
+        vis_emb: torch.Tensor,      # (B, D)
+    ) -> torch.Tensor:              # (B, D)
+        # Unsqueeze to add sequence dimension: (B, 1, D)
+        q = mol_emb.unsqueeze(1)
+        kv = vis_emb.unsqueeze(1)
+
+        # Cross-attend: molecule queries vision
+        attended, _ = self.attn(query=q, key=kv, value=kv)
+
+        # Residual connection + LayerNorm
+        fused = self.norm(mol_emb + attended.squeeze(1))
+        return fused
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# R-Agent (Phase 3 with Vision)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ReactionAgent(nn.Module):
     """
-    R-Agent: Predicts synthetic yield score from molecular descriptors.
+    R-Agent (Phase 3): Predicts synthetic yield score from molecular descriptors
+    optionally enriched with vision embeddings from VisionTemporalTransformer.
 
-    The 3-dim descriptor vector (SA, MolWt, logP) is passed through a small
-    MLP that maps it to a hidden embedding and a scalar yield score.
-
-    For the prototype the MLP replaces a full Transformer to keep compute
-    low, while still matching the spirit of the design (a learnable module
-    that can be supervised with real yield labels if available).
-
-    Usage::
-
+    Usage (with vision)::
         agent = ReactionAgent()
+        vision_seq = simulate_reaction_video(feats)           # (50, 16)
+        yield_score, emb = agent("CC(=O)Oc1ccccc1C(=O)O", vision_seq.unsqueeze(0))
+
+    Usage (without vision, backward compatible)::
         yield_score, emb = agent("CC(=O)Oc1ccccc1C(=O)O")
     """
 
@@ -117,11 +142,18 @@ class ReactionAgent(nn.Module):
         self,
         hidden_dim: int = 128,
         dropout: float = 0.1,
+        use_vision: bool = True,
+        vision_input_dim: int = 16,
+        vision_embed_dim: int = 128,
+        vision_seq_len: int = 50,
+        vision_layers: int = 3,
+        vision_heads: int = 4,
     ) -> None:
         super().__init__()
-        self.hidden_dim = hidden_dim
+        self.hidden_dim  = hidden_dim
+        self.use_vision  = use_vision
 
-        # Feature encoder: 3 → hidden_dim
+        # ── Molecular feature encoder: 3 → hidden_dim ──────────────────────
         self.encoder = nn.Sequential(
             nn.Linear(REACTION_FEAT_DIM, 64),
             nn.GELU(),
@@ -129,50 +161,90 @@ class ReactionAgent(nn.Module):
             nn.Linear(64, hidden_dim),
             nn.GELU(),
         )
+        self.mol_ln = nn.LayerNorm(hidden_dim)
 
-        self.ln = nn.LayerNorm(hidden_dim)
+        # ── Vision transformer (imported lazily to avoid circular imports) ──
+        if use_vision:
+            from vision_agent import VisionTemporalTransformer
+            self.vision_transformer = VisionTemporalTransformer(
+                input_dim=vision_input_dim,
+                embed_dim=vision_embed_dim,
+                num_layers=vision_layers,
+                num_heads=vision_heads,
+            )
+            self.cross_attn = CrossAttentionFusion(
+                embed_dim=hidden_dim,
+                num_heads=4,
+            )
+        else:
+            self.vision_transformer = None
+            self.cross_attn = None
 
-        # Yield prediction head
+        # ── Yield prediction head ───────────────────────────────────────────
         self.head = nn.Sequential(
             nn.Linear(hidden_dim, 32),
             nn.GELU(),
             nn.Linear(32, 1),
-            nn.Sigmoid(),   # output ∈ [0, 1]
+            nn.Sigmoid(),
         )
 
-    def forward_features(self, feat: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward_features(
+        self,
+        feat: torch.Tensor,                         # (B, 3)
+        vision_seq: Optional[torch.Tensor] = None,  # (B, T, 16)
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
-            feat: (batch, 3) descriptor tensor.
+            feat:       (batch, 3) descriptor tensor.
+            vision_seq: (batch, seq_len, feature_dim) optional vision sequence.
 
         Returns:
             yield_scores: (batch,) tensor.
             embeddings:   (batch, hidden_dim) tensor.
         """
-        emb   = self.ln(self.encoder(feat))
-        score = self.head(emb).squeeze(-1)
-        return score, emb
+        mol_emb = self.mol_ln(self.encoder(feat))   # (B, D)
 
-    def forward(self, smiles: str) -> Tuple[float, torch.Tensor]:
+        if self.use_vision and vision_seq is not None and self.vision_transformer is not None:
+            vis_emb = self.vision_transformer(vision_seq)   # (B, D)
+            fused   = self.cross_attn(mol_emb, vis_emb)     # (B, D)
+        else:
+            fused = mol_emb
+
+        score = self.head(fused).squeeze(-1)
+        return score, fused
+
+    def forward(
+        self,
+        smiles: str,
+        vision_seq: Optional[torch.Tensor] = None,   # (1, T, 16) or (T, 16)
+    ) -> Tuple[float, torch.Tensor]:
         """
-        Predict yield score for a single SMILES string.
+        Predict yield score for a single SMILES string, optionally using vision.
 
         Args:
-            smiles: SMILES string.
+            smiles:     SMILES string.
+            vision_seq: (1, seq_len, 16) or (seq_len, 16) vision tensor (optional).
 
         Returns:
             yield_score: float ∈ [0, 1].
-            embedding:   (hidden_dim,) tensor — passed to P-Agent.
+            embedding:   (hidden_dim,) tensor.
         """
         feats = compute_reaction_features(smiles)
-        if feats is None:
-            device = next(self.parameters()).device
-            zero_emb = torch.zeros(self.hidden_dim, device=device)
-            return 0.0, zero_emb
+        device = next(self.parameters()).device
 
-        device  = next(self.parameters()).device
-        t_feat  = torch.tensor(feats, dtype=torch.float, device=device).unsqueeze(0)
-        scores, embs = self.forward_features(t_feat)
+        if feats is None:
+            return 0.0, torch.zeros(self.hidden_dim, device=device)
+
+        t_feat = torch.tensor(feats, dtype=torch.float, device=device).unsqueeze(0)  # (1, 3)
+
+        # Handle optional vision sequence
+        v_seq = None
+        if vision_seq is not None:
+            if vision_seq.dim() == 2:           # (T, D) -> (1, T, D)
+                vision_seq = vision_seq.unsqueeze(0)
+            v_seq = vision_seq.to(device)
+
+        scores, embs = self.forward_features(t_feat, vision_seq=v_seq)
         return float(scores[0].item()), embs[0]
 
 
@@ -181,15 +253,24 @@ class ReactionAgent(nn.Module):
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     from utils import get_zinc_sample
+    from vision_agent import simulate_reaction_video
     set_seed(42)
 
-    agent = ReactionAgent()
+    agent = ReactionAgent(use_vision=True)
     print(f"R-Agent parameters: {sum(p.numel() for p in agent.parameters()):,}")
 
-    for smi in get_zinc_sample()[:5]:
-        score, emb = agent(smi)
+    for smi in get_zinc_sample()[:3]:
+        # Generate vision sequence for this molecule
         feats = compute_reaction_features(smi)
+        if feats is not None:
+            vis_seq = simulate_reaction_video(feats)   # (50, 16)
+            vision_var = float(torch.var(vis_seq).item())
+            score, emb = agent(smi, vision_seq=vis_seq)
+        else:
+            vision_var = 0.0
+            score, emb = agent(smi)
         print(
-            f"  yield={score:.4f}  feats={np.round(feats, 3)}  "
-            f"emb_shape={emb.shape}  smi={smi[:40]}"
+            f"  yield={score:.4f}  vision_var={vision_var:.4f}  "
+            f"emb={emb.shape}  smi={smi[:40]}"
         )
+    print("✅ R-Agent (Phase 3 Vision) self-test passed!")

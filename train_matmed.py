@@ -1,19 +1,21 @@
 """
-train_matmed.py — MATMED Training Loop
-========================================
+train_matmed.py — MATMED Training Loop (Phase 3)
+=================================================
 Orchestrates the full MATMED pipeline:
 
   G-Agent → molecule generation
   E-Agent → binding score + graph embedding
   S-Agent → ADMET (toxicity + druglikeness)
-  R-Agent → reaction feasibility (yield)
+  R-Agent → reaction feasibility (yield) ← now with Vision cross-attention!
+  V-Agent → reaction video simulation via VisionTemporalTransformer
   P-Agent → policy decision (accept / modify / regenerate / stop)
   Reward  → composite multi-objective signal
   RL      → REINFORCE with value-function baseline
 
-For the prototype we run a fixed number of *episodes*, each consisting of
-up to MAX_STEPS_PER_EPISODE molecule evaluations.  The policy is updated
-with REINFORCE at the end of each episode.
+New in Phase 3:
+  - Each molecule now triggers simulate_reaction_video() → (50, 16) tensor
+  - Vision tensor is passed to R-Agent for cross-attended yield prediction
+  - Per-episode logging: vision_variance and yield_sa_corr
 
 Usage::
 
@@ -37,7 +39,8 @@ from reward import RewardFunction, RewardConfig
 from generator_agent import GeneratorAgent, pretrain_generator
 from evaluator_agent import EvaluatorAgent
 from safety_agent import SafetyAgent
-from reaction_agent import ReactionAgent
+from reaction_agent import ReactionAgent, compute_reaction_features
+from vision_agent import simulate_reaction_video
 from policy_agent import PolicyAgent, ACTION_NAMES, _discount_returns
 
 logger = get_logger('MATMED')
@@ -172,8 +175,17 @@ class MATMEDRunner:
             toxicity, admet_score = 0.5, 0.5
             s_emb = torch.zeros(self.s_agent.embed_dim, device=self.device)
 
-        # 4. Yield (R-Agent) ───────────────────────────────────────────────
-        yield_score, r_emb = self.r_agent.forward(smiles if valid else 'C')
+        # 4. Yield (R-Agent) + Vision ────────────────────────────────────
+        mol_smiles  = smiles if valid else 'C'
+        mol_feats   = compute_reaction_features(mol_smiles)
+
+        vision_var  = 0.0
+        vis_seq     = None
+        if mol_feats is not None:
+            vis_seq    = simulate_reaction_video(mol_feats).to(self.device)  # (50, 16)
+            vision_var = float(torch.var(vis_seq).item())
+
+        yield_score, r_emb = self.r_agent.forward(mol_smiles, vision_seq=vis_seq)
         r_emb = r_emb.detach()
 
         # 5. Reward ───────────────────────────────────────────────────────
@@ -183,10 +195,11 @@ class MATMEDRunner:
             reward = self.reward_fn.compute(binding_score, yield_score, admet_score, toxicity)
 
         scores = {
-            'binding': binding_score,
-            'yield':   yield_score,
-            'admet':   admet_score,
-            'toxicity': toxicity,
+            'binding':      binding_score,
+            'yield':        yield_score,
+            'admet':        admet_score,
+            'toxicity':     toxicity,
+            'vision_var':   vision_var,
         }
 
         # 6. Policy ───────────────────────────────────────────────────────
@@ -258,6 +271,9 @@ class MATMEDRunner:
         transitions: List[Transition] = []
         episode_smiles: List[str]     = []
         episode_rewards: List[float]  = []
+        episode_yields:  List[float]  = []
+        episode_sa:      List[float]  = []
+        episode_vis_var: List[float]  = []
 
         prev_reward = 0.0
         for step in range(max_steps):
@@ -265,7 +281,15 @@ class MATMEDRunner:
             transitions.append(transition)
             episode_smiles.append(smiles)
             episode_rewards.append(reward)
+            episode_yields.append(scores.get('yield', 0.0))
+            episode_vis_var.append(scores.get('vision_var', 0.0))
             prev_reward = reward
+
+            # Accumulate per-molecule SA score for correlation
+            from reaction_agent import compute_reaction_features
+            mol_feats = compute_reaction_features(smiles if is_valid_smiles(smiles) else 'C')
+            sa_score = float(mol_feats[0]) if mol_feats is not None else 0.0
+            episode_sa.append(sa_score)
 
             # Track best
             if is_valid_smiles(smiles) and reward > self.best_reward:
@@ -276,6 +300,18 @@ class MATMEDRunner:
         # Policy update
         loss_info = self._update_policy(transitions)
 
+        # Vision Metrics ─────────────────────────────────────────────────────
+        avg_vis_var = sum(episode_vis_var) / max(1, len(episode_vis_var))
+
+        # Pearson correlation between predicted yields and SA scores
+        import numpy as np
+        yield_arr = np.array(episode_yields, dtype=np.float32)
+        sa_arr    = np.array(episode_sa, dtype=np.float32)
+        if yield_arr.std() > 1e-6 and sa_arr.std() > 1e-6:
+            yield_sa_corr = float(np.corrcoef(yield_arr, sa_arr)[0, 1])
+        else:
+            yield_sa_corr = 0.0
+
         # Aggregate metrics
         valid_count  = sum(is_valid_smiles(s) for s in episode_smiles)
         pct_valid    = 100.0 * valid_count / max(1, max_steps)
@@ -283,18 +319,21 @@ class MATMEDRunner:
         diversity    = diversity_score(episode_smiles)
 
         metrics = {
-            'episode':      episode_idx,
-            'avg_reward':   avg_reward,
-            'best_reward':  self.best_reward,
-            'pct_valid':    pct_valid,
-            'diversity':    diversity,
+            'episode':          episode_idx,
+            'avg_reward':       avg_reward,
+            'best_reward':      self.best_reward,
+            'pct_valid':        pct_valid,
+            'diversity':        diversity,
+            'vision_variance':  avg_vis_var,
+            'yield_sa_corr':    yield_sa_corr,
             **loss_info,
         }
 
         logger.info(
             f"Episode {episode_idx:3d} | avg_rwd={avg_reward:.3f} | "
             f"best={self.best_reward:.3f} | valid={pct_valid:.0f}% | "
-            f"div={diversity:.3f} | loss={loss_info.get('total_loss', 0):.4f}"
+            f"div={diversity:.3f} | loss={loss_info.get('total_loss', 0):.4f} | "
+            f"vis_var={avg_vis_var:.3f} | yield_sa_corr={yield_sa_corr:.3f}"
         )
 
         self.all_metrics.append(metrics)
