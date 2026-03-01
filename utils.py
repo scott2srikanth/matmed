@@ -22,8 +22,32 @@ from rdkit import Chem
 from rdkit.Chem import Descriptors, rdMolDescriptors, DataStructs, AllChem
 
 # ─────────────────────────────────────────────────────────────
-# Reproducibility
+# Reproducibility & Data
 # ─────────────────────────────────────────────────────────────
+
+def get_zinc_sample(n: int = 10) -> List[str]:
+    """
+    Return a small dummy sample of ZINC SMILES strings for prototyping.
+    In a real scenario, this would load from a downloaded ZINC dataset.
+    """
+    # A small set of valid SMILES strings (many from ZINC/ChEMBL)
+    sample_smiles = [
+        "CC(=O)Oc1ccccc1C(=O)O",          # Aspirin
+        "CC1(C(N2C(S1)C(C2=O)NC(=O)CC3=CC=CC=C3)C(=O)O)C", # Penicillin G
+        "CN1C=NC2=C1C(=O)N(C(=O)N2C)C",    # Caffeine
+        "CC(C)(C)NCC(O)c1ccc(O)c(CO)c1",   # Albuterol
+        "c1ccccc1",                        # Benzene
+        "CCO",                             # Ethanol
+        "C1CCCCC1",                        # Cyclohexane
+        "CC(=O)NC1=CC=C(O)C=C1",           # Paracetamol
+        "C1=CC=C(C=C1)O",                  # Phenol
+        "CC(C)CC1=CC=C(C=C1)C(C)C(=O)O"    # Ibuprofen
+    ]
+    # If more are requested, just cycle through them
+    result = []
+    while len(result) < n:
+        result.extend(sample_smiles)
+    return result[:n]
 
 def set_seed(seed: int = 42) -> None:
     """Set random seeds for full reproducibility."""
