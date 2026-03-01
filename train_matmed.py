@@ -129,8 +129,8 @@ class MATMEDRunner:
 
         # ── Metrics ─────────────────────────────────────────────────────────
         self.best_reward    = -float('inf')
-        self.best_smiles    = None
         self.all_metrics: List[Dict] = []
+        self.top_smiles: Dict[str, float] = {}  # Track top N SMILES
 
         # ── Pretrain G-Agent ────────────────────────────────────────────────
         logger.info("Pretraining G-Agent on ZINC sample …")
@@ -305,10 +305,19 @@ class MATMEDRunner:
             episode_sa.append(sa_score)
 
             # Track best
-            if is_valid_smiles(smiles) and reward > self.best_reward:
-                self.best_reward = reward
-                self.best_smiles = smiles
-                logger.info(f"  ★ New best reward={reward:.4f}  SMILES={smiles}")
+            if is_valid_smiles(smiles):
+                if reward > self.best_reward:
+                    self.best_reward = reward
+                    self.best_smiles = smiles
+                    logger.info(f"  ★ New best reward={reward:.4f}  SMILES={smiles}")
+                
+                # Maintain top 50 unique SMILES by reward
+                if smiles not in self.top_smiles or reward > self.top_smiles[smiles]:
+                    self.top_smiles[smiles] = reward
+                if len(self.top_smiles) > 50:
+                    # Remove the lowest reward item
+                    lowest_smi = min(self.top_smiles, key=self.top_smiles.get)
+                    del self.top_smiles[lowest_smi]
 
         # Policy update
         loss_info = self._update_policy(transitions)
