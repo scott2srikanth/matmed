@@ -259,6 +259,7 @@ class EvaluatorAgent(nn.Module):
         x: torch.Tensor,
         edge_index: torch.Tensor,
         edge_attr: torch.Tensor,
+        batch_idx: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Process a single molecular graph.
@@ -277,9 +278,25 @@ class EvaluatorAgent(nn.Module):
         for layer in self.gt_layers:
             h = layer(h, edge_index, edge_attr)
 
-        # Global mean pooling
-        embedding = h.mean(dim=0)  # (hidden_dim,)
-        score = self.head(embedding.unsqueeze(0)).squeeze()  # scalar
+        if batch_idx is None:
+            # Single graph: Global mean pooling
+            embedding = h.mean(dim=0).unsqueeze(0)  # (1, hidden_dim)
+        else:
+            # Batched graphs: scatter mean pooling
+            from torch_scatter import scatter_mean  # Fallback manual scatter if missing
+            try:
+                from torch_scatter import scatter_mean
+                embedding = scatter_mean(h, batch_idx, dim=0)  # (batch_size, hidden_dim)
+            except ImportError:
+                # Manual scatter-mean fallback for pure PyTorch without PyG/torch_scatter
+                num_graphs = int(batch_idx.max().item() + 1)
+                embedding = torch.zeros(num_graphs, h.size(-1), device=h.device)
+                counts = torch.zeros(num_graphs, 1, device=h.device)
+                embedding.scatter_add_(0, batch_idx.unsqueeze(-1).expand_as(h), h)
+                counts.scatter_add_(0, batch_idx.unsqueeze(-1), torch.ones_like(batch_idx.unsqueeze(-1).float()))
+                embedding = embedding / counts.clamp(min=1)
+
+        score = self.head(embedding).squeeze(-1)  # (batch_size,) or scalar if batch_size=1
 
         return score, embedding
 
@@ -306,8 +323,9 @@ class EvaluatorAgent(nn.Module):
         edge_index = graph['edge_index'].to(device)
         edge_attr  = graph['edge_attr'].to(device)
 
-        score, emb = self.forward_graph(x, edge_index, edge_attr)
-        return float(score.item()), emb
+        batch_idx = torch.zeros(x.size(0), dtype=torch.long, device=device)
+        score, emb = self.forward_graph(x, edge_index, edge_attr, batch_idx)
+        return float(score.item()), emb.squeeze(0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

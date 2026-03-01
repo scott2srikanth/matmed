@@ -41,9 +41,10 @@ class BindingDataset(Dataset):
 def collate_graphs(batch):
     # batch is list of (dict, label)
     x_list, edge_index_list, edge_attr_list, labels_list = [], [], [], []
+    batch_idx_list = []
     node_offset = 0
     
-    for item in batch:
+    for idx, item in enumerate(batch):
         g, label = item
         num_nodes = g['x'].size(0)
         
@@ -53,6 +54,7 @@ def collate_graphs(batch):
         edge_index_list.append(shifted_edge_index)
         edge_attr_list.append(g['edge_attr'])
         labels_list.append(label)
+        batch_idx_list.append(torch.full((num_nodes,), idx, dtype=torch.long))
         
         node_offset += num_nodes
         
@@ -60,11 +62,13 @@ def collate_graphs(batch):
     batched_edge_index = torch.cat(edge_index_list, dim=1)
     batched_edge_attr = torch.cat(edge_attr_list, dim=0)
     batched_labels = torch.tensor(labels_list, dtype=torch.float32)
+    batched_batch_idx = torch.cat(batch_idx_list, dim=0)
     
     batched_g = {
         'x': batched_x,
         'edge_index': batched_edge_index,
-        'edge_attr': batched_edge_attr
+        'edge_attr': batched_edge_attr,
+        'batch_idx': batched_batch_idx
     }
     
     return batched_g, batched_labels
@@ -114,7 +118,7 @@ def pretrain_e_agent(
             batch_g = {k: v.to(device) for k, v in batch_g.items()}
             batch_y = batch_y.to(device)
             optimizer.zero_grad()
-            pred, _ = model.forward_graph(batch_g['x'], batch_g['edge_index'], batch_g['edge_attr'])
+            pred, _ = model.forward_graph(batch_g['x'], batch_g['edge_index'], batch_g['edge_attr'], batch_g['batch_idx'])
             pred = pred.squeeze(-1)
             loss = criterion(pred, batch_y)
             loss.backward()
@@ -130,7 +134,7 @@ def pretrain_e_agent(
             for batch_g, batch_y in val_loader:
                 batch_g = {k: v.to(device) for k, v in batch_g.items()}
                 batch_y = batch_y.to(device)
-                pred, _ = model.forward_graph(batch_g['x'], batch_g['edge_index'], batch_g['edge_attr'])
+                pred, _ = model.forward_graph(batch_g['x'], batch_g['edge_index'], batch_g['edge_attr'], batch_g['batch_idx'])
                 pred = pred.squeeze(-1)
                 val_loss += criterion(pred, batch_y).item()
         val_loss /= len(val_loader)
@@ -146,13 +150,18 @@ def pretrain_e_agent(
                 for batch_g, batch_y in test_loader:
                     batch_g = {k: v.to(device) for k, v in batch_g.items()}
                     batch_y = batch_y.to(device)
-                    pred, _ = model.forward_graph(batch_g['x'], batch_g['edge_index'], batch_g['edge_attr'])
+                    pred, _ = model.forward_graph(batch_g['x'], batch_g['edge_index'], batch_g['edge_attr'], batch_g['batch_idx'])
                     pred = pred.squeeze(-1)
                     test_loss += criterion(pred, batch_y).item()
                     preds.append(pred.cpu().numpy())
                     trues.append(batch_y.cpu().numpy())
             
-            test_loss /= len(test_loader)
+            test_loss /= len(test_loader) if len(test_loader) > 0 else 1 # Handle empty test_loader
+            if len(preds) == 0:
+                logger.warning("   [New Best] Test set is empty. No test metrics.")
+                torch.save(model.state_dict(), "binding_regressor.pt")
+                continue
+                
             preds = np.concatenate(preds)
             trues = np.concatenate(trues)
             
