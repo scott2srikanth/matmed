@@ -195,12 +195,18 @@ class MATMEDRunner:
             reward = self.reward_fn.compute(binding_score, yield_score, admet_score, toxicity)
 
         scores = {
-            'binding':      binding_score,
-            'yield':        yield_score,
-            'admet':        admet_score,
-            'toxicity':     toxicity,
-            'vision_var':   vision_var,
+            'binding':           binding_score,
+            'yield':             yield_score,
+            'admet':             admet_score,
+            'toxicity':          toxicity,
+            'vision_var':        vision_var,
         }
+
+        # Also log raw uncertainty (mu, sigma) for diagnostics
+        if mol_feats is not None:
+            mu, sigma = self.r_agent.get_uncertainty(mol_smiles, vision_seq=vis_seq)
+            scores['yield_mu']    = mu
+            scores['yield_sigma'] = sigma
 
         # 6. Policy ───────────────────────────────────────────────────────
         self.p_agent.train()
@@ -274,6 +280,7 @@ class MATMEDRunner:
         episode_yields:  List[float]  = []
         episode_sa:      List[float]  = []
         episode_vis_var: List[float]  = []
+        episode_sigma:   List[float]  = []   # yield uncertainty
 
         prev_reward = 0.0
         for step in range(max_steps):
@@ -283,6 +290,7 @@ class MATMEDRunner:
             episode_rewards.append(reward)
             episode_yields.append(scores.get('yield', 0.0))
             episode_vis_var.append(scores.get('vision_var', 0.0))
+            episode_sigma.append(scores.get('yield_sigma', 0.0))
             prev_reward = reward
 
             # Accumulate per-molecule SA score for correlation
@@ -301,7 +309,8 @@ class MATMEDRunner:
         loss_info = self._update_policy(transitions)
 
         # Vision Metrics ─────────────────────────────────────────────────────
-        avg_vis_var = sum(episode_vis_var) / max(1, len(episode_vis_var))
+        avg_vis_var      = sum(episode_vis_var) / max(1, len(episode_vis_var))
+        avg_yield_sigma  = sum(episode_sigma) / max(1, len(episode_sigma))
 
         # Pearson correlation between predicted yields and SA scores
         import numpy as np
@@ -319,13 +328,14 @@ class MATMEDRunner:
         diversity    = diversity_score(episode_smiles)
 
         metrics = {
-            'episode':          episode_idx,
-            'avg_reward':       avg_reward,
-            'best_reward':      self.best_reward,
-            'pct_valid':        pct_valid,
-            'diversity':        diversity,
-            'vision_variance':  avg_vis_var,
-            'yield_sa_corr':    yield_sa_corr,
+            'episode':            episode_idx,
+            'avg_reward':         avg_reward,
+            'best_reward':        self.best_reward,
+            'pct_valid':          pct_valid,
+            'diversity':          diversity,
+            'vision_variance':    avg_vis_var,
+            'yield_sa_corr':      yield_sa_corr,
+            'yield_uncertainty':  avg_yield_sigma,
             **loss_info,
         }
 
@@ -333,7 +343,8 @@ class MATMEDRunner:
             f"Episode {episode_idx:3d} | avg_rwd={avg_reward:.3f} | "
             f"best={self.best_reward:.3f} | valid={pct_valid:.0f}% | "
             f"div={diversity:.3f} | loss={loss_info.get('total_loss', 0):.4f} | "
-            f"vis_var={avg_vis_var:.3f} | yield_sa_corr={yield_sa_corr:.3f}"
+            f"vis_var={avg_vis_var:.3f} | yield_sa_corr={yield_sa_corr:.3f} | "
+            f"yield_unc={avg_yield_sigma:.3f}"
         )
 
         self.all_metrics.append(metrics)
