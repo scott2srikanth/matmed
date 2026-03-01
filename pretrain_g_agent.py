@@ -51,8 +51,8 @@ def pretrain_g_agent_chembl(
     model = GeneratorAgent(
         tokenizer=tokenizer,
         d_model=256,
-        n_heads=8,
-        n_layers=4,    # matching spec
+        nhead=8,
+        num_layers=4,    # matching spec
         max_len=128
     ).to(device)
 
@@ -68,7 +68,7 @@ def pretrain_g_agent_chembl(
             x, y = x.to(device), y.to(device)
             optimizer.zero_grad()
             
-            logits = model(x)  # (B, seq_len, vocab_size)
+            logits, _ = model(x)  # (B, seq_len, vocab_size), embedding
             
             # flatten
             logits = logits.view(-1, tokenizer.vocab_size)
