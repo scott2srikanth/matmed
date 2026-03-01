@@ -32,7 +32,7 @@ class SMILESDataset(Dataset):
         return x, y
 
 def pretrain_g_agent_chembl(
-    num_epochs: int = 10,
+    num_epochs: int = 50,
     batch_size: int = 128,
     lr: float = 1e-4,
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
@@ -42,7 +42,7 @@ def pretrain_g_agent_chembl(
     logger.info(f"Phase 4: Starting G-Agent Pretraining on ChEMBL ({device})")
 
     # 1. Load Data
-    smiles_list = load_chembl_sample(num_samples=5000) # prototype sample size
+    smiles_list = load_chembl_sample(num_samples=50000)  # large corpus for proper LM pretraining
     tokenizer = SMILESTokenizer()
     dataset = SMILESDataset(smiles_list, tokenizer)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
