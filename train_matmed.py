@@ -88,7 +88,9 @@ class MATMEDRunner:
         entropy_coeff: float = 0.01,
         seed: int = 42,
         device: Optional[torch.device] = None,
-        use_chemberta: bool = False,   # set True if network available
+        use_chemberta: bool = False,
+        use_vision: bool = True,              # Phase 3: enable VTT cross-attention
+        uncertainty_lambda: float = 0.1,      # Phase 3: lambda in R = mu - lambda*sigma
     ) -> None:
         set_seed(seed)
 
@@ -103,7 +105,10 @@ class MATMEDRunner:
         self.g_agent = GeneratorAgent(tokenizer=self.tokenizer).to(device)
         self.e_agent = EvaluatorAgent().to(device)
         self.s_agent = SafetyAgent(use_chemberta=use_chemberta).to(device)
-        self.r_agent = ReactionAgent().to(device)
+        self.r_agent = ReactionAgent(
+            use_vision=use_vision,
+            uncertainty_lambda=uncertainty_lambda,
+        ).to(device)
 
         self.p_agent = PolicyAgent(
             d_g=self.g_agent.d_model,
