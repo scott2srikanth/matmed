@@ -91,6 +91,7 @@ class MATMEDRunner:
         use_chemberta: bool = False,
         use_vision: bool = True,              # Phase 3: enable VTT cross-attention
         uncertainty_lambda: float = 0.1,      # Phase 3: lambda in R = mu - lambda*sigma
+        ppo_clip: float = 1.0,                # Phase 4: gradient clip tuning
     ) -> None:
         set_seed(seed)
 
@@ -126,6 +127,7 @@ class MATMEDRunner:
         # ── Hyper-params ────────────────────────────────────────────────────
         self.gamma = gamma
         self.entropy_coeff = entropy_coeff
+        self.ppo_clip = ppo_clip
 
         # ── Metrics ─────────────────────────────────────────────────────────
         self.best_reward    = -float('inf')
@@ -257,7 +259,7 @@ class MATMEDRunner:
 
         self.policy_optim.zero_grad()
         loss_dict['total_loss'].backward()
-        nn.utils.clip_grad_norm_(self.p_agent.parameters(), max_norm=1.0)
+        nn.utils.clip_grad_norm_(self.p_agent.parameters(), max_norm=self.ppo_clip)
         self.policy_optim.step()
 
         return {k: float(v.item()) for k, v in loss_dict.items()}
