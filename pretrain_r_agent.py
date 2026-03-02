@@ -54,6 +54,35 @@ def generate_negative_samples(smiles_list, frac: float = 1.0):
     return negatives
 
 
+def _safe_three_way_scaffold_split(smiles_list: list, seed: int = 42):
+    n = len(smiles_list)
+    idx_all = list(range(n))
+    if n < 3:
+        return idx_all, [], []
+
+    train_full_idx, test_idx = scaffold_split(smiles_list, test_frac=0.1, seed=seed)
+    train_full_smiles = [smiles_list[i] for i in train_full_idx]
+    rel_train_idx, rel_val_idx = scaffold_split(train_full_smiles, test_frac=0.1111111111, seed=seed)
+    train_idx = [train_full_idx[i] for i in rel_train_idx]
+    val_idx = [train_full_idx[i] for i in rel_val_idx]
+    if len(train_idx) > 0 and len(val_idx) > 0 and len(test_idx) > 0:
+        return train_idx, val_idx, test_idx
+
+    rng = random.Random(seed)
+    shuffled = idx_all[:]
+    rng.shuffle(shuffled)
+    n_test = max(1, int(0.1 * n))
+    n_val = max(1, int(0.1 * n))
+    test_idx = shuffled[:n_test]
+    val_idx = shuffled[n_test:n_test + n_val]
+    train_idx = shuffled[n_test + n_val:]
+    if len(train_idx) == 0:
+        train_idx = shuffled[:max(1, n - 2)]
+        val_idx = shuffled[max(1, n - 2):max(1, n - 1)]
+        test_idx = shuffled[max(1, n - 1):]
+    return train_idx, val_idx, test_idx
+
+
 def corrupt_frames(frames: torch.Tensor, noise_std: float = 0.1) -> torch.Tensor:
     noise = torch.randn_like(frames) * noise_std
     return frames + noise
@@ -81,11 +110,7 @@ def pretrain_r_agent(
     all_data = list(zip(smiles_all, labels_all))
 
     # Scaffold split: 80/10/10 via two-stage split.
-    train_full_idx, test_idx = scaffold_split(smiles_all, test_frac=0.1, seed=seed)
-    train_full_smiles = [smiles_all[i] for i in train_full_idx]
-    rel_train_idx, rel_val_idx = scaffold_split(train_full_smiles, test_frac=0.1111111111, seed=seed)
-    train_idx = [train_full_idx[i] for i in rel_train_idx]
-    val_idx = [train_full_idx[i] for i in rel_val_idx]
+    train_idx, val_idx, test_idx = _safe_three_way_scaffold_split(smiles_all, seed=seed)
 
     train_raw = [all_data[i] for i in train_idx]
     val_raw = [all_data[i] for i in val_idx]

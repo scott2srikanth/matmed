@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 import numpy as np
+import random
 from sklearn.metrics import roc_auc_score
 
 from utils import get_logger, set_seed, SMILESTokenizer
@@ -39,6 +40,35 @@ class Tox21Dataset(Dataset):
     def __getitem__(self, idx):
         return self.data[idx]
 
+
+def _safe_three_way_scaffold_split(smiles_list: list, seed: int = 42):
+    n = len(smiles_list)
+    idx_all = list(range(n))
+    if n < 3:
+        return idx_all, [], []
+
+    train_full_idx, test_idx = scaffold_split(smiles_list, test_frac=0.1, seed=seed)
+    train_full_smiles = [smiles_list[i] for i in train_full_idx]
+    rel_train_idx, rel_val_idx = scaffold_split(train_full_smiles, test_frac=0.1111111111, seed=seed)
+    train_idx = [train_full_idx[i] for i in rel_train_idx]
+    val_idx = [train_full_idx[i] for i in rel_val_idx]
+    if len(train_idx) > 0 and len(val_idx) > 0 and len(test_idx) > 0:
+        return train_idx, val_idx, test_idx
+
+    rng = random.Random(seed)
+    shuffled = idx_all[:]
+    rng.shuffle(shuffled)
+    n_test = max(1, int(0.1 * n))
+    n_val = max(1, int(0.1 * n))
+    test_idx = shuffled[:n_test]
+    val_idx = shuffled[n_test:n_test + n_val]
+    train_idx = shuffled[n_test + n_val:]
+    if len(train_idx) == 0:
+        train_idx = shuffled[:max(1, n - 2)]
+        val_idx = shuffled[max(1, n - 2):max(1, n - 1)]
+        test_idx = shuffled[max(1, n - 1):]
+    return train_idx, val_idx, test_idx
+
 def pretrain_s_agent(
     num_epochs: int = 15,
     batch_size: int = 64,
@@ -53,11 +83,7 @@ def pretrain_s_agent(
     raw_data = load_tox21_sample(2000)
     tokenizer = SMILESTokenizer()
     smiles_list = [s for s, _ in raw_data]
-    train_full_idx, test_idx = scaffold_split(smiles_list, test_frac=0.1, seed=seed)
-    train_full_smiles = [smiles_list[i] for i in train_full_idx]
-    rel_train_idx, rel_val_idx = scaffold_split(train_full_smiles, test_frac=0.1111111111, seed=seed)
-    train_idx = [train_full_idx[i] for i in rel_train_idx]
-    val_idx = [train_full_idx[i] for i in rel_val_idx]
+    train_idx, val_idx, test_idx = _safe_three_way_scaffold_split(smiles_list, seed=seed)
 
     train_raw = [raw_data[i] for i in train_idx]
     val_raw = [raw_data[i] for i in val_idx]

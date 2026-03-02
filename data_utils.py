@@ -170,7 +170,7 @@ def load_bindingdb_sample(num_samples: int = 1000):
     """
     logger.info("Loading synthetic BindingDB (pIC50) sample...")
     from utils import get_zinc_sample
-    mols = get_zinc_sample()[:num_samples]
+    mols = get_zinc_sample(n=num_samples)[:num_samples]
     
     dataset = []
     for m in mols:
@@ -191,7 +191,7 @@ def load_tox21_sample(num_samples: int = 2000):
     """
     logger.info("Loading synthetic Tox21 sample (12 endpoints)...")
     from utils import get_zinc_sample
-    mols = get_zinc_sample()[:num_samples]
+    mols = get_zinc_sample(n=num_samples)[:num_samples]
     
     dataset = []
     for m in mols:
@@ -211,7 +211,7 @@ def load_uspto_sample(num_samples: int = 1500):
     """
     logger.info("Loading synthetic USPTO sample (Reaction success)...")
     from utils import get_zinc_sample
-    mols = get_zinc_sample()[:num_samples]
+    mols = get_zinc_sample(n=num_samples)[:num_samples]
     
     dataset = []
     for m in mols:
