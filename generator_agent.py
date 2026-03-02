@@ -181,6 +181,7 @@ class GeneratorAgent(nn.Module):
         batch_size: int = 1,
         temperature: float = 1.0,
         top_k: int = 0,
+        min_len: int = 8,
         device: Optional[torch.device] = None,
     ) -> Tuple[list, torch.Tensor]:
         """
@@ -245,11 +246,26 @@ class GeneratorAgent(nn.Module):
                 # Grammar mask 1: no unmatched close paren.
                 if close_paren_idx is not None and open_count <= 0:
                     next_logits[i, close_paren_idx] = -float('inf')
+                # Do not close immediately after opening.
+                if (
+                    close_paren_idx is not None
+                    and len(toks) > 0
+                    and self.tokenizer.idx2char.get(toks[-1], '') == '('
+                ):
+                    next_logits[i, close_paren_idx] = -float('inf')
 
                 # Grammar mask 2: prevent overusing a ring index (>2 usually invalid).
                 for d, idx_d in ring_digit_indices.items():
                     if ring_counts[d] >= 2:
                         next_logits[i, idx_d] = -float('inf')
+                # Prevent consecutive ring digits.
+                if len(toks) > 0 and self.tokenizer.idx2char.get(toks[-1], '').isdigit():
+                    for idx_d in ring_digit_indices.values():
+                        next_logits[i, idx_d] = -float('inf')
+
+                # Avoid too-short sequences ending immediately.
+                if sequences.size(1) < min_len:
+                    next_logits[i, eos] = -float('inf')
 
             probs = F.softmax(next_logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1)  # (B, 1)

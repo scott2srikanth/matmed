@@ -220,21 +220,28 @@ class MATMEDRunner:
         smiles = ""
         g_emb = torch.zeros(self.g_agent.d_model, device=self.device)
         valid = False
-        # Retry sampling a few times before accepting invalid penalty.
-        for _ in range(3):
+        # Batch candidate search + retry with stricter sampling.
+        for pass_idx in range(2):
             gen_smiles_list, g_emb_t = self.g_agent.generate(
-                batch_size=1,
+                batch_size=32,
                 temperature=temperature,
                 top_k=top_k,
+                min_len=8,
             )
-            smiles = gen_smiles_list[0]
-            g_emb = g_emb_t[0].detach()
-            valid = is_valid_smiles(smiles)
+            chosen_idx = 0
+            for idx, cand in enumerate(gen_smiles_list):
+                if is_valid_smiles(cand):
+                    chosen_idx = idx
+                    valid = True
+                    break
+            smiles = gen_smiles_list[chosen_idx]
+            g_emb = g_emb_t[chosen_idx].detach()
             if valid:
                 break
-            # Tighten sampling on retry.
-            temperature = max(0.7, temperature - 0.1)
-            top_k = max(16, top_k // 2)
+            # Tighten sampling on second pass.
+            if pass_idx == 0:
+                temperature = 0.6
+                top_k = 12
 
         if not valid:
             reward = -2.0   # hard penalty for invalid molecule
@@ -551,8 +558,29 @@ class MATMEDRunner:
             if selected_action == 3 and step >= self.min_steps_before_stop:  # avoid one-step episodes
                 break
 
-        # Policy update
-        loss_info = self._update_policy(transitions)
+        # Aggregate metrics
+        valid_count  = sum(is_valid_smiles(s) for s in episode_smiles)
+        pct_valid    = 100.0 * valid_count / max(1, max_steps)
+        invalid_count = max_steps - valid_count
+        pct_invalid = 100.0 - pct_valid
+        avg_reward   = sum(episode_rewards) / max(1, len(episode_rewards))
+        diversity    = diversity_score(episode_smiles)
+
+        # Policy update (validity-gated to prevent invalid-trajectory drift)
+        if pct_valid < 40.0:
+            self._grammar_refresh()
+            loss_info = {
+                'policy_loss': 0.0,
+                'value_loss': 0.0,
+                'entropy': 0.0,
+                'total_loss': 0.0,
+                'kl_coef': float(self.kl_coef),
+                'kl': 0.0,
+                'approx_kl': 0.0,
+                'policy_entropy': 0.0,
+            }
+        else:
+            loss_info = self._update_policy(transitions)
 
         # Vision Metrics ─────────────────────────────────────────────────────
         avg_vis_var      = sum(episode_vis_var) / max(1, len(episode_vis_var))
@@ -566,14 +594,6 @@ class MATMEDRunner:
             yield_sa_corr = float(np.corrcoef(yield_arr, sa_arr)[0, 1])
         else:
             yield_sa_corr = 0.0
-
-        # Aggregate metrics
-        valid_count  = sum(is_valid_smiles(s) for s in episode_smiles)
-        pct_valid    = 100.0 * valid_count / max(1, max_steps)
-        invalid_count = max_steps - valid_count
-        pct_invalid = 100.0 - pct_valid
-        avg_reward   = sum(episode_rewards) / max(1, len(episode_rewards))
-        diversity    = diversity_score(episode_smiles)
 
         metrics = {
             'episode':            episode_idx,
@@ -600,6 +620,20 @@ class MATMEDRunner:
 
         self.all_metrics.append(metrics)
         return metrics
+
+    def _grammar_refresh(self) -> None:
+        """Short supervised refresh pass to pull generator back toward valid SMILES grammar."""
+        try:
+            smiles = get_zinc_sample(n=64)
+            pretrain_generator(
+                self.g_agent,
+                smiles,
+                num_epochs=1,
+                lr=5e-5,
+                device=self.device,
+            )
+        except Exception as exc:
+            logger.warning(f"Grammar refresh skipped due to error: {exc}")
 
     # ── Training ────────────────────────────────────────────────────────────
 
