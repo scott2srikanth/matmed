@@ -40,7 +40,7 @@ Reinforcement learning:
 """
 
 import math
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -151,7 +151,7 @@ class PolicyAgent(nn.Module):
         e_emb: torch.Tensor,
         s_emb: torch.Tensor,
         r_emb: torch.Tensor,
-        reward: float = 0.0,
+        reward: Union[float, torch.Tensor] = 0.0,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Compute action logits and state value from agent embeddings.
@@ -183,9 +183,21 @@ class PolicyAgent(nn.Module):
         e_tok = self.proj_e(e_emb).unsqueeze(1)
         s_tok = self.proj_s(s_emb).unsqueeze(1)
         r_tok = self.proj_r(r_emb).unsqueeze(1)
-        rew_tok = self.proj_reward(
-            torch.tensor([[reward]], dtype=torch.float, device=device).expand(B, 1)
-        ).unsqueeze(1)
+        if isinstance(reward, torch.Tensor):
+            reward_t = reward.to(device=device, dtype=torch.float)
+            if reward_t.dim() == 0:
+                reward_t = reward_t.view(1, 1).expand(B, 1)
+            elif reward_t.dim() == 1:
+                if reward_t.size(0) == 1 and B > 1:
+                    reward_t = reward_t.expand(B).view(B, 1)
+                else:
+                    reward_t = reward_t.view(B, 1)
+            else:
+                reward_t = reward_t.view(B, 1)
+        else:
+            reward_t = torch.full((B, 1), float(reward), dtype=torch.float, device=device)
+
+        rew_tok = self.proj_reward(reward_t).unsqueeze(1)
 
         # CLS token
         cls = self.cls_token.expand(B, -1, -1)  # (B, 1, d_model)
@@ -243,25 +255,18 @@ class PolicyAgent(nn.Module):
     def compute_policy_loss(
         self,
         log_probs: torch.Tensor,
+        old_log_probs: torch.Tensor,
         rewards: torch.Tensor,
         values: torch.Tensor,
         gamma: float = 0.99,
         entropy_coeff: float = 0.01,
-        action_probs_all: Optional[torch.Tensor] = None,
+        action_probs: Optional[torch.Tensor] = None,
+        old_action_probs: Optional[torch.Tensor] = None,
+        ppo_eps: float = 0.2,
+        kl_coef: float = 0.0,
     ) -> Dict[str, torch.Tensor]:
         """
-        Compute REINFORCE loss with value-function baseline (advantage).
-
-        Args:
-            log_probs:        (T,) log-probabilities of taken actions.
-            rewards:          (T,) actual rewards received.
-            values:           (T,) value estimates V(s_t).
-            gamma:            Discount factor.
-            entropy_coeff:    Coefficient for entropy regularisation bonus.
-            action_probs_all: (T, NUM_ACTIONS) for entropy; optional.
-
-        Returns:
-            Dict with 'policy_loss', 'value_loss', 'entropy', 'total_loss'.
+        Compute true PPO clipped loss over gathered transitions.
         """
         # Compute discounted returns
         returns = _discount_returns(rewards, gamma)
@@ -270,23 +275,38 @@ class PolicyAgent(nn.Module):
         advantages = returns - values.detach()
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        # Policy gradient loss
-        policy_loss = -(log_probs * advantages).mean()
+        # PPO ratio
+        ratios = torch.exp(log_probs - old_log_probs)
+
+        surrogate1 = ratios * advantages
+        surrogate2 = torch.clamp(ratios, 1 - ppo_eps, 1 + ppo_eps) * advantages
+
+        policy_loss = -torch.min(surrogate1, surrogate2).mean()
 
         # Value function loss (MSE)
         value_loss = F.mse_loss(values, returns)
 
         # Entropy bonus (only if probs provided)
         entropy = torch.tensor(0.0)
-        if action_probs_all is not None:
-            entropy = -(action_probs_all * torch.log(action_probs_all + 1e-8)).sum(-1).mean()
+        if action_probs is not None:
+            entropy = -(action_probs * torch.log(action_probs + 1e-8)).sum(-1).mean()
 
-        total_loss = policy_loss + 0.5 * value_loss - entropy_coeff * entropy
+        # KL(old || new) over full action distribution when available.
+        if action_probs is not None and old_action_probs is not None:
+            kl = (
+                old_action_probs
+                * (torch.log(old_action_probs + 1e-8) - torch.log(action_probs + 1e-8))
+            ).sum(-1).mean()
+        else:
+            kl = 0.5 * (log_probs - old_log_probs).pow(2).mean()
+
+        total_loss = policy_loss + 0.5 * value_loss - entropy_coeff * entropy + kl_coef * kl
 
         return {
             'policy_loss': policy_loss,
             'value_loss':  value_loss,
             'entropy':     entropy,
+            'kl':          kl,
             'total_loss':  total_loss,
         }
 

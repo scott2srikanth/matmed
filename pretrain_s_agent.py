@@ -14,7 +14,8 @@ from sklearn.metrics import roc_auc_score
 
 from utils import get_logger, set_seed, SMILESTokenizer
 from safety_agent import SafetyAgent
-from data_utils import load_tox21_sample
+from data_utils import load_tox21_sample, scaffold_split
+from calibration_utils import calibrate_model
 
 logger = get_logger('S-Agent Pretrain')
 
@@ -51,14 +52,20 @@ def pretrain_s_agent(
     # 1. Load Data
     raw_data = load_tox21_sample(2000)
     tokenizer = SMILESTokenizer()
-    dataset = Tox21Dataset(raw_data, tokenizer)
-    
-    # 80/10/10 split
-    n = len(dataset)
-    n_tr = int(0.8 * n)
-    n_va = int(0.1 * n)
-    n_te = n - n_tr - n_va
-    train_ds, val_ds, test_ds = torch.utils.data.random_split(dataset, [n_tr, n_va, n_te])
+    smiles_list = [s for s, _ in raw_data]
+    train_full_idx, test_idx = scaffold_split(smiles_list, test_frac=0.1, seed=seed)
+    train_full_smiles = [smiles_list[i] for i in train_full_idx]
+    rel_train_idx, rel_val_idx = scaffold_split(train_full_smiles, test_frac=0.1111111111, seed=seed)
+    train_idx = [train_full_idx[i] for i in rel_train_idx]
+    val_idx = [train_full_idx[i] for i in rel_val_idx]
+
+    train_raw = [raw_data[i] for i in train_idx]
+    val_raw = [raw_data[i] for i in val_idx]
+    test_raw = [raw_data[i] for i in test_idx]
+
+    train_ds = Tox21Dataset(train_raw, tokenizer)
+    val_ds = Tox21Dataset(val_raw, tokenizer)
+    test_ds = Tox21Dataset(test_raw, tokenizer)
     
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
     val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False)
@@ -91,7 +98,12 @@ def pretrain_s_agent(
     model = Tox21SafetyModel(base_sa).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    criterion = nn.BCEWithLogitsLoss()
+    train_labels = torch.tensor(np.stack([y for _, y in train_raw]), dtype=torch.float32)
+    num_pos = train_labels.sum(dim=0)
+    num_neg = train_labels.size(0) - num_pos
+    pos_weight = (num_neg / num_pos.clamp(min=1.0)).to(device)
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    logger.info("Class balance pos/neg: %.1f / %.1f", float(num_pos.sum().item()), float(num_neg.sum().item()))
 
     # 3. Training Loop
     best_val_auc = -1.0
@@ -99,6 +111,7 @@ def pretrain_s_agent(
         # Train
         model.train()
         train_loss = 0.0
+        train_logits = []
         for x, y in train_loader:
             x, y = x.to(device), y.to(device)
             optimizer.zero_grad()
@@ -107,29 +120,38 @@ def pretrain_s_agent(
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
+            train_logits.append(logits.detach().cpu())
             
-        train_loss /= len(train_loader)
+        train_loss /= max(1, len(train_loader))
         
         # Eval
         model.eval()
         val_loss = 0.0
+        val_logits = []
         all_preds, all_trues = [], []
         with torch.no_grad():
             for x, y in val_loader:
                 x, y = x.to(device), y.to(device)
                 logits = model(x)
                 val_loss += criterion(logits, y).item()
+                val_logits.append(logits.detach().cpu())
                 all_preds.append(torch.sigmoid(logits).cpu().numpy())
                 all_trues.append(y.cpu().numpy())
                 
-        val_loss /= len(val_loader)
-        all_preds = np.vstack(all_preds)
-        all_trues = np.vstack(all_trues)
+        val_loss /= max(1, len(val_loader))
+        if train_logits:
+            tr = torch.cat(train_logits, dim=0)
+            logger.info("Train output mean/std: %.4f / %.4f", tr.mean().item(), tr.std(unbiased=False).item())
+        if val_logits:
+            va = torch.cat(val_logits, dim=0)
+            logger.info("Val output mean/std: %.4f / %.4f", va.mean().item(), va.std(unbiased=False).item())
+        all_preds = np.vstack(all_preds) if all_preds else np.zeros((0, 12), dtype=np.float32)
+        all_trues = np.vstack(all_trues) if all_trues else np.zeros((0, 12), dtype=np.float32)
         
         # Calculate AUROC across 12 tasks
         aucs = []
         for i in range(12):
-            if len(np.unique(all_trues[:, i])) == 2:
+            if all_trues.shape[0] > 0 and len(np.unique(all_trues[:, i])) == 2:
                 aucs.append(roc_auc_score(all_trues[:, i], all_preds[:, i]))
         val_auc = np.mean(aucs) if aucs else 0.5
         
@@ -141,6 +163,14 @@ def pretrain_s_agent(
             
             # Save the ENCODER weights so RL phase generic SafetyAgent can load it
             torch.save(model.encoder.state_dict(), "toxicity_model.pt")
+            torch.save(model.state_dict(), "toxicity_model_raw_head.pt")
+
+    # Post-hoc temperature scaling on validation data for calibrated logits.
+    if os.path.exists("toxicity_model_raw_head.pt"):
+        model.load_state_dict(torch.load("toxicity_model_raw_head.pt", map_location=device))
+        scaler = calibrate_model(model, val_loader, device)
+        torch.save(scaler.state_dict(), "safety_temp_scaler.pt")
+        logger.info("Saved safety_temp_scaler.pt.")
 
     logger.info("Saved toxicity_model.pt (encoder weights).")
 

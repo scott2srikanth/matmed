@@ -46,9 +46,10 @@ def load_pretrained_runner(
         use_chemberta=False,
         use_vision=not ablation_config.get('no_vision', False),
         uncertainty_lambda=0.1,
-        lr_policy=5e-5,        # Slower RL learning rate for smoother curve
-        entropy_coeff=0.05,    # Higher entropy to prevent policy collapse into guessing
-        ppo_clip=0.25          # Slightly looser clipping
+        lr_policy=1e-5,        # Adjusted from 5e-5 to 1e-5
+        entropy_coeff=0.1,     # Adjusted from 0.05 to 0.1
+        ppo_clip=0.1,          # Adjusted from 0.25 to 0.1
+        kl_coef=0.1,           # New KL reg parameter
     )
     
     # Load weights
@@ -101,7 +102,7 @@ def run_phase4_experiment(
     experiment_name: str,
     ablation_config: dict,
     num_episodes: int = 50, # Reduced from 500 for prototype speed, scale up later
-    steps_per_episode: int = 8
+    steps_per_episode: int = 64
 ):
     print(f"\n{'='*70}\n  Phase 4 RL — {experiment_name}\n{'='*70}")
     

@@ -34,7 +34,7 @@ ABLATIONS = {
 
 SEEDS      = [42, 0, 7]
 N_EPISODES = 50
-STEPS_EP   = 8
+STEPS_EP   = 64
 
 COLORS = {
     "Full MATMED":       "steelblue",
@@ -62,9 +62,10 @@ def run_one(name: str, cfg: dict, seed: int) -> pd.DataFrame:
         use_chemberta=False,
         use_vision=not cfg.get("no_vision", False),
         uncertainty_lambda=0.1,
-        lr_policy=5e-5,
-        entropy_coeff=0.05,
-        ppo_clip=0.25,
+        lr_policy=1e-5,
+        entropy_coeff=0.1,
+        ppo_clip=0.1,
+        kl_coef=0.1,
     )
 
     # Load the pretrained checkpoint if it exists (best effort, strict=False to skip arch mismatches)

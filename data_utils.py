@@ -9,14 +9,48 @@ Downloads and pre-processes real-world datasets for Phase 4 pretraining:
 """
 
 import os
+import random
 import pandas as pd
 import numpy as np
 from rdkit import Chem
+from rdkit.Chem.Scaffolds import MurckoScaffold
 from utils import get_logger
 
 logger = get_logger('DataUtils')
 DATA_DIR = 'datasets'
 os.makedirs(DATA_DIR, exist_ok=True)
+
+
+def scaffold_split(smiles_list, test_frac: float = 0.2, seed: int = 42):
+    """
+    Bemis-Murcko scaffold split.
+    Returns train_indices, test_indices without scaffold leakage.
+    """
+    random.seed(seed)
+
+    scaffolds = {}
+    for i, smi in enumerate(smiles_list):
+        mol = Chem.MolFromSmiles(smi)
+        if mol is None:
+            scaffold = "__invalid__"
+        else:
+            scaffold = MurckoScaffold.MurckoScaffoldSmiles(mol=mol)
+        scaffolds.setdefault(scaffold, []).append(i)
+
+    scaffold_sets = list(scaffolds.values())
+    random.shuffle(scaffold_sets)
+
+    test_size = int(len(smiles_list) * test_frac)
+    test_indices = []
+    train_indices = []
+
+    for scaffold_group in scaffold_sets:
+        if len(test_indices) + len(scaffold_group) <= test_size:
+            test_indices.extend(scaffold_group)
+        else:
+            train_indices.extend(scaffold_group)
+
+    return train_indices, test_indices
 
 def sanitize_smiles(smiles: str, max_len: int = 128) -> str:
     """Canonicalize SMILES, remove salts, check validity and length."""

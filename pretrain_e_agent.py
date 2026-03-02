@@ -13,23 +13,28 @@ import numpy as np
 
 from utils import get_logger, set_seed
 from evaluator_agent import EvaluatorAgent, smiles_to_graph
-from data_utils import load_bindingdb_sample
+from data_utils import load_bindingdb_sample, scaffold_split
 
 logger = get_logger('E-Agent Pretrain')
 
 class BindingDataset(Dataset):
     def __init__(self, data_tuples: list):
         self.data = []
-        for smi, pic50 in data_tuples:
+        raw_targets = []
+        for smi, target in data_tuples:
             g = smiles_to_graph(smi)
             if g is not None:
-                self.data.append((g, float(pic50)))
+                raw_targets.append(float(target))
+                self.data.append((g, float(target)))
                 
-        # Normalize pIC50 to [0,1]
-        self.y = np.array([d[1] for d in self.data])
+        # Log-transform to p-like scale: y = -log10(raw + eps)
+        self.y = -np.log10(np.array(raw_targets, dtype=np.float64) + 1e-12)
+        print("Binding target mean/std:", float(self.y.mean()), float(self.y.std()))
+
+        # Normalize transformed targets to [0,1] for stable regression.
         self.y_min, self.y_max = self.y.min(), self.y.max()
         for i in range(len(self.data)):
-            norm_pic50 = (self.data[i][1] - self.y_min) / (self.y_max - self.y_min + 1e-8)
+            norm_pic50 = (self.y[i] - self.y_min) / (self.y_max - self.y_min + 1e-8)
             self.data[i] = (self.data[i][0], norm_pic50)
 
     def __len__(self):
@@ -85,14 +90,20 @@ def pretrain_e_agent(
 
     # 1. Load Data
     raw_data = load_bindingdb_sample(1000)
-    dataset = BindingDataset(raw_data)
-    
-    # 80/10/10 split
-    n = len(dataset)
-    n_tr = int(0.8 * n)
-    n_va = int(0.1 * n)
-    n_te = n - n_tr - n_va
-    train_ds, val_ds, test_ds = torch.utils.data.random_split(dataset, [n_tr, n_va, n_te])
+    smiles_list = [s for s, _ in raw_data]
+    train_full_idx, test_idx = scaffold_split(smiles_list, test_frac=0.1, seed=seed)
+    train_full_smiles = [smiles_list[i] for i in train_full_idx]
+    rel_train_idx, rel_val_idx = scaffold_split(train_full_smiles, test_frac=0.1111111111, seed=seed)
+    train_idx = [train_full_idx[i] for i in rel_train_idx]
+    val_idx = [train_full_idx[i] for i in rel_val_idx]
+
+    train_raw = [raw_data[i] for i in train_idx]
+    val_raw = [raw_data[i] for i in val_idx]
+    test_raw = [raw_data[i] for i in test_idx]
+
+    train_ds = BindingDataset(train_raw)
+    val_ds = BindingDataset(val_raw)
+    test_ds = BindingDataset(test_raw)
     
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_graphs)
     val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False, collate_fn=collate_graphs)
@@ -114,28 +125,38 @@ def pretrain_e_agent(
         # Train
         model.train()
         train_loss = 0.0
+        train_outputs = []
         for batch_g, batch_y in train_loader:
             batch_g = {k: v.to(device) for k, v in batch_g.items()}
             batch_y = batch_y.to(device)
             optimizer.zero_grad()
             pred, _ = model.forward_graph(batch_g['x'], batch_g['edge_index'], batch_g['edge_attr'], batch_g['batch_idx'])
-            loss = criterion(pred, batch_y.unsqueeze(1))
+            loss = criterion(pred, batch_y)
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
+            train_outputs.append(pred.detach().cpu())
             
-        train_loss /= len(train_loader)
+        train_loss /= max(1, len(train_loader))
         
         # Eval
         model.eval()
         val_loss = 0.0
+        val_outputs = []
         with torch.no_grad():
             for batch_g, batch_y in val_loader:
                 batch_g = {k: v.to(device) for k, v in batch_g.items()}
                 batch_y = batch_y.to(device)
                 pred, _ = model.forward_graph(batch_g['x'], batch_g['edge_index'], batch_g['edge_attr'], batch_g['batch_idx'])
-                val_loss += criterion(pred, batch_y.unsqueeze(1)).item()
-        val_loss /= len(val_loader)
+                val_loss += criterion(pred, batch_y).item()
+                val_outputs.append(pred.detach().cpu())
+        val_loss /= max(1, len(val_loader))
+        if train_outputs:
+            train_cat = torch.cat(train_outputs, dim=0)
+            logger.info("Train output mean/std: %.4f / %.4f", train_cat.mean().item(), train_cat.std(unbiased=False).item())
+        if val_outputs:
+            val_cat = torch.cat(val_outputs, dim=0)
+            logger.info("Val output mean/std: %.4f / %.4f", val_cat.mean().item(), val_cat.std(unbiased=False).item())
         
         logger.info(f"Epoch {epoch:2d}/{num_epochs} | Train MSE: {train_loss:.4f} | Val MSE: {val_loss:.4f}")
         
@@ -149,9 +170,9 @@ def pretrain_e_agent(
                     batch_g = {k: v.to(device) for k, v in batch_g.items()}
                     batch_y = batch_y.to(device)
                     pred, _ = model.forward_graph(batch_g['x'], batch_g['edge_index'], batch_g['edge_attr'], batch_g['batch_idx'])
-                    test_loss += criterion(pred, batch_y.unsqueeze(1)).item()
+                    test_loss += criterion(pred, batch_y).item()
                     preds.append(pred.detach().cpu().numpy())
-                    trues.append(batch_y.unsqueeze(1).cpu().numpy())
+                    trues.append(batch_y.cpu().numpy())
             
             test_loss /= len(test_loader) if len(test_loader) > 0 else 1 # Handle empty test_loader
             if len(preds) == 0:

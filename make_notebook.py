@@ -828,21 +828,3 @@ with open("matmed_colab.ipynb", "w") as f:
     json.dump(nb, f, indent=2)
 
 print("✅  matmed_colab.ipynb generated successfully.")
-'''))
-
-nb = {
-    "nbformat": 4,
-    "nbformat_minor": 5,
-    "metadata": {
-        "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
-        "language_info": {"name": "python", "version": "3.10.0"},
-        "colab": {"name": "MATMED_Colab.ipynb", "provenance": []}
-    },
-    "cells": cells,
-}
-
-import json
-with open("/Users/srikanthreddy/.gemini/antigravity/scratch/matmed/matmed_colab.ipynb", "w") as f:
-    json.dump(nb, f, indent=2)
-
-print("Notebook written.")
