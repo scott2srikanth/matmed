@@ -223,7 +223,8 @@ class GeneratorAgent(nn.Module):
             next_logits = logits[:, -1, :] / temperature  # (B, vocab)
 
             if top_k > 0:
-                topk_vals = next_logits.topk(top_k, dim=-1).values[:, -1:]
+                k = min(top_k, next_logits.size(-1))
+                topk_vals = next_logits.topk(k, dim=-1).values[:, -1:]
                 next_logits = next_logits.masked_fill(next_logits < topk_vals, -float('inf'))
 
             for i in range(batch_size):
