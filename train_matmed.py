@@ -144,11 +144,12 @@ class MATMEDRunner:
         # ── Reward ──────────────────────────────────────────────────────────
         self.reward_fn = RewardFunction(reward_config)
         self.reward_aggregator = RewardAggregator(
-            w_bind=0.5,
+            w_bind=0.25,
             w_safety=1.0,
-            w_reaction=1.0,
-            w_vision=0.5,
+            w_reaction=1.25,
+            w_vision=0.75,
         )
+        self.min_steps_before_stop = 8
 
         # ── Optimisers ──────────────────────────────────────────────────────
         self.policy_optim = torch.optim.Adam(self.p_agent.parameters(), lr=lr_policy)
@@ -210,21 +211,30 @@ class MATMEDRunner:
         # 1. Generate ─────────────────────────────────────────────────────
         self.g_agent.eval()
         if requested_action == 0:          # ACCEPT -> exploit nearby high-probability region
-            temperature, top_k = 0.7, 16
+            temperature, top_k = 0.7, 24
         elif requested_action == 1:        # MODIFY -> moderate exploration
-            temperature, top_k = 0.9, 32
-        else:                              # REGENERATE / default -> broader exploration
-            temperature, top_k = 1.2, 0
+            temperature, top_k = 0.85, 32
+        else:                              # REGENERATE / default -> keep exploration but grammar-safe
+            temperature, top_k = 0.95, 48
 
-        gen_smiles_list, g_emb = self.g_agent.generate(
-            batch_size=1,
-            temperature=temperature,
-            top_k=top_k,
-        )
-        smiles = gen_smiles_list[0]
-        g_emb  = g_emb[0].detach()  # (d_g,)
-
-        valid = is_valid_smiles(smiles)
+        smiles = ""
+        g_emb = torch.zeros(self.g_agent.d_model, device=self.device)
+        valid = False
+        # Retry sampling a few times before accepting invalid penalty.
+        for _ in range(3):
+            gen_smiles_list, g_emb_t = self.g_agent.generate(
+                batch_size=1,
+                temperature=temperature,
+                top_k=top_k,
+            )
+            smiles = gen_smiles_list[0]
+            g_emb = g_emb_t[0].detach()
+            valid = is_valid_smiles(smiles)
+            if valid:
+                break
+            # Tighten sampling on retry.
+            temperature = max(0.7, temperature - 0.1)
+            top_k = max(16, top_k // 2)
 
         if not valid:
             reward = -2.0   # hard penalty for invalid molecule
@@ -260,7 +270,8 @@ class MATMEDRunner:
                 vis_seq = simulate_reaction_video(mol_feats).to(self.device)  # (50, 28)
                 vision_var = float(torch.var(vis_seq).item())
 
-            yield_score, r_emb = self.r_agent.forward(smiles, vision_seq=vis_seq)
+            raw_reaction_score, r_emb, mu, sigma = self.r_agent.forward_raw(smiles, vision_seq=vis_seq)
+            yield_score = max(0.0, min(1.0, raw_reaction_score))
             r_emb = r_emb.detach()
 
             # 5. Reward ───────────────────────────────────────────────────────
@@ -269,7 +280,7 @@ class MATMEDRunner:
             total_reward_t, reward_stats = self.reward_aggregator.aggregate(
                 r_bind_raw=torch.tensor([binding_score], dtype=torch.float, device=self.device),
                 r_safety_raw=torch.tensor([admet_score - toxicity], dtype=torch.float, device=self.device),
-                r_reaction_raw=torch.tensor([yield_score], dtype=torch.float, device=self.device),
+                r_reaction_raw=torch.tensor([raw_reaction_score], dtype=torch.float, device=self.device),
                 r_vision_raw=torch.tensor([vision_var], dtype=torch.float, device=self.device),
                 return_details=True,
             )
@@ -327,7 +338,6 @@ class MATMEDRunner:
 
         # Also log raw uncertainty (mu, sigma) for diagnostics
         if valid and mol_feats is not None:
-            mu, sigma = self.r_agent.get_uncertainty(smiles, vision_seq=vis_seq)
             scores['yield_mu']    = mu
             scores['yield_sigma'] = sigma
 
@@ -501,7 +511,7 @@ class MATMEDRunner:
         prev_reward = 0.0
         requested_action = 2  # default to REGENERATE at episode start
         for step in range(max_steps):
-            if requested_action == 3:  # STOP action from previous step
+            if requested_action == 3 and step >= self.min_steps_before_stop:
                 break
 
             smiles, reward, scores, transition, selected_action = self._step(
@@ -538,7 +548,7 @@ class MATMEDRunner:
                     lowest_smi = min(self.top_smiles, key=self.top_smiles.get)
                     del self.top_smiles[lowest_smi]
 
-            if selected_action == 3:  # STOP immediately ends episode
+            if selected_action == 3 and step >= self.min_steps_before_stop:  # avoid one-step episodes
                 break
 
         # Policy update

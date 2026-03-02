@@ -204,6 +204,11 @@ class GeneratorAgent(nn.Module):
         eos = self.tokenizer.eos_idx
         pad = self.tokenizer.pad_idx
         close_paren_idx = self.tokenizer.char2idx.get(')')
+        ring_digit_indices = {
+            d: self.tokenizer.char2idx.get(str(d))
+            for d in range(1, 10)
+            if self.tokenizer.char2idx.get(str(d)) is not None
+        }
 
         # Initialise sequences with SOS
         sequences = torch.full((batch_size, 1), sos, dtype=torch.long, device=device)
@@ -221,21 +226,29 @@ class GeneratorAgent(nn.Module):
                 topk_vals = next_logits.topk(top_k, dim=-1).values[:, -1:]
                 next_logits = next_logits.masked_fill(next_logits < topk_vals, -float('inf'))
 
-            # Optional lightweight grammar mask: do not allow ')' if no unmatched '(' exists.
-            if close_paren_idx is not None:
-                for i in range(batch_size):
-                    if finished[i]:
-                        continue
-                    toks = sequences[i].tolist()
-                    open_count = 0
-                    for idx in toks:
-                        tok = self.tokenizer.idx2char.get(idx, '')
-                        if tok == '(':
-                            open_count += 1
-                        elif tok == ')' and open_count > 0:
-                            open_count -= 1
-                    if open_count <= 0:
-                        next_logits[i, close_paren_idx] = -float('inf')
+            for i in range(batch_size):
+                if finished[i]:
+                    continue
+                toks = sequences[i].tolist()
+                open_count = 0
+                ring_counts = {d: 0 for d in ring_digit_indices}
+                for idx in toks:
+                    tok = self.tokenizer.idx2char.get(idx, '')
+                    if tok == '(':
+                        open_count += 1
+                    elif tok == ')' and open_count > 0:
+                        open_count -= 1
+                    elif tok.isdigit() and int(tok) in ring_counts:
+                        ring_counts[int(tok)] += 1
+
+                # Grammar mask 1: no unmatched close paren.
+                if close_paren_idx is not None and open_count <= 0:
+                    next_logits[i, close_paren_idx] = -float('inf')
+
+                # Grammar mask 2: prevent overusing a ring index (>2 usually invalid).
+                for d, idx_d in ring_digit_indices.items():
+                    if ring_counts[d] >= 2:
+                        next_logits[i, idx_d] = -float('inf')
 
             probs = F.softmax(next_logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1)  # (B, 1)

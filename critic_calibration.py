@@ -9,10 +9,10 @@ class CriticCalibrator:
     def __init__(self):
         # temperature scaling per critic
         self.temp = {
-            "bind": 1.0,
+            "bind": 2.0,
             "safety": 1.0,
-            "reaction": 1.0,
-            "vision": 1.0,
+            "reaction": 0.7,
+            "vision": 0.8,
         }
         self.target_std = 1.0
         self.adapt_rate = 0.01

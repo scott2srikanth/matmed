@@ -254,16 +254,28 @@ class ReactionAgent(nn.Module):
         smiles: str,
         vision_seq: Optional[torch.Tensor] = None,   # (T, d_raw) or (1, T, d_raw)
     ) -> Tuple[float, torch.Tensor]:
+        raw_score, emb, _, _ = self.forward_raw(smiles, vision_seq=vision_seq)
+        score = max(0.0, min(1.0, raw_score))
+        return score, emb
+
+    def forward_raw(
+        self,
+        smiles: str,
+        vision_seq: Optional[torch.Tensor] = None,   # (T, d_raw) or (1, T, d_raw)
+    ) -> Tuple[float, torch.Tensor, float, float]:
         """
         Returns:
-            yield_score: float   μ - λσ  (uncertainty-penalized yield)
+            raw_yield_score: float   μ - λσ  (unclipped uncertainty-penalized yield)
             embedding:   (hidden_dim,) h_fused tensor for P-Agent
+            mu:          float mean prediction
+            sigma:       float predictive std
         """
         feats  = compute_reaction_features(smiles)
         device = next(self.parameters()).device
 
         if feats is None:
-            return 0.0, torch.zeros(self.hidden_dim, device=device)
+            z = torch.zeros(self.hidden_dim, device=device)
+            return 0.0, z, 0.0, 0.0
 
         t_feat = torch.tensor(feats, dtype=torch.float, device=device).unsqueeze(0)
 
@@ -274,11 +286,8 @@ class ReactionAgent(nn.Module):
         mu, var, h_fused = self.forward_features(t_feat, vision_seq=v_seq)
 
         sigma = torch.sqrt(var.clamp(min=1e-8))
-        # R = μ - λσ  (exploration-aware, spec Part IV)
-        score = float((mu[0] - self.lam * sigma[0]).item())
-        score = max(0.0, min(1.0, score))   # clamp to [0, 1]
-
-        return score, h_fused[0].detach()
+        raw_score = float((mu[0] - self.lam * sigma[0]).item())
+        return raw_score, h_fused[0].detach(), float(mu[0].item()), float(sigma[0].item())
 
     def get_uncertainty(
         self,

@@ -141,10 +141,10 @@ class RewardAggregator:
     """
     def __init__(
         self,
-        w_bind: float = 0.5,
+        w_bind: float = 0.25,
         w_safety: float = 1.0,
-        w_reaction: float = 1.0,
-        w_vision: float = 0.5,
+        w_reaction: float = 1.25,
+        w_vision: float = 0.75,
         momentum: float = 0.99,
         eps: float = 1e-8,
     ) -> None:
