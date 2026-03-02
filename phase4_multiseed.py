@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import stats
+from pandas.plotting import table as pd_table
 
 from utils import get_logger, set_seed
 from reward import RewardConfig
@@ -110,6 +111,17 @@ def steady_state(df: pd.DataFrame, n: int = 15) -> pd.Series:
     return df["avg_reward"].tail(n)
 
 
+def _validity_percent_series(df: pd.DataFrame) -> pd.Series:
+    """
+    Normalize validity to [0, 100] regardless of whether the source stores
+    it as fraction [0,1] or percent [0,100].
+    """
+    vals = df["pct_valid"].astype(float)
+    if vals.max() <= 1.0:
+        return vals * 100.0
+    return vals
+
+
 # ---------------------------------------------------------------------------
 # Main driver
 # ---------------------------------------------------------------------------
@@ -151,17 +163,18 @@ def main():
     fig2, ax2 = plt.subplots(figsize=(8, 6))
     pareto_points = {}
     for name, dfs in all_data.items():
-        validity_vals = [df["pct_valid"].tail(15).mean() for df in dfs]
+        validity_vals = [_validity_percent_series(df).tail(15).mean() for df in dfs]
         reward_vals   = [df["avg_reward"].tail(15).mean() for df in dfs]
         px = np.mean(validity_vals)
         py = np.mean(reward_vals)
+        pxe = np.std(validity_vals)
         pe = np.std(reward_vals)
-        pareto_points[name] = (px, py, pe)
-        ax2.errorbar(px, py, yerr=pe, fmt='o', color=COLORS[name],
+        pareto_points[name] = (px, py, pxe, pe)
+        ax2.errorbar(px, py, xerr=pxe, yerr=pe, fmt='o', color=COLORS[name],
                      markersize=10, capsize=5, label=name, alpha=0.9)
     
     ax2.annotate("Ideal Domain\n(High Validity, High Reward)",
-                 xy=(0.93 * max(p[0] for p in pareto_points.values()), 
+                 xy=(0.93 * max(p[0] for p in pareto_points.values()),
                      max(p[1] for p in pareto_points.values()) + 0.01),
                  xytext=(40, -0.55),
                  arrowprops=dict(facecolor='black', shrink=0.05, width=1.5, headwidth=8),
@@ -170,6 +183,7 @@ def main():
     ax2.set_title("MATMED Pareto Frontier: Structural Validity vs. Target Optimization", fontsize=12, fontweight='bold')
     ax2.set_xlabel("Structural Validity (% Valid SMILES)", fontsize=11)
     ax2.set_ylabel("Overall Multi-Objective Reward", fontsize=11)
+    ax2.set_xlim(0, 100)
     ax2.grid(alpha=0.3)
     ax2.legend()
     plt.tight_layout()
@@ -181,9 +195,13 @@ def main():
     full_rewards = np.concatenate([steady_state(df).values for df in all_data["Full MATMED"]])
 
     rows = []
+    seed_level_rows = []
     for name, dfs in all_data.items():
+        seed_rewards = []
+        seed_validity = []
+        seed_low_feas = []
         pooled = np.concatenate([steady_state(df).values for df in dfs])
-        validity_pool = np.concatenate([df["pct_valid"].tail(15).values for df in dfs])
+        validity_pool = np.concatenate([_validity_percent_series(df).tail(15).values for df in dfs])
 
         pct_invalid  = 100.0 - validity_pool.mean()
         # Low feasibility proxy: 1 - (pct_valid * diversity)
@@ -191,10 +209,21 @@ def main():
         stability    = (validity_pool / 100.0) * div_pool
         low_feas     = (1.0 - stability.mean()) * 100.0
 
+        for df in dfs:
+            valid_s = _validity_percent_series(df).tail(15)
+            rew_s = df["avg_reward"].tail(15)
+            div_s = df["diversity"].tail(15)
+            low_feas_s = (1.0 - (valid_s / 100.0) * div_s).mean() * 100.0
+            seed_rewards.append(rew_s.mean())
+            seed_validity.append(valid_s.mean())
+            seed_low_feas.append(low_feas_s)
+
         if name == "Full MATMED":
             t_stat, p_val = float("nan"), float("nan")
         else:
-            t_stat, p_val = stats.ttest_ind(full_rewards, pooled, equal_var=False)
+            # Seed-level test avoids pseudo-replication from pooled episodes.
+            full_seed_rewards = [steady_state(df).mean() for df in all_data["Full MATMED"]]
+            t_stat, p_val = stats.ttest_ind(full_seed_rewards, seed_rewards, equal_var=False)
 
         sig = ""
         if not np.isnan(p_val):
@@ -205,16 +234,44 @@ def main():
 
         rows.append({
             "Model":             name,
-            "Avg Reward":        f"{pooled.mean():.3f} ± {pooled.std():.3f}",
+            "Avg Reward":        f"{np.mean(seed_rewards):.3f} ± {np.std(seed_rewards):.3f}",
             "% Invalid SMILES":  f"{pct_invalid:.1f}%",
             "% Low Feasibility": f"{low_feas:.1f}%",
             "vs Full (p-value)": f"{p_val:.4f} {sig}" if not np.isnan(p_val) else "—",
+        })
+        seed_level_rows.append({
+            "Model": name,
+            "avg_reward_mean": float(np.mean(seed_rewards)),
+            "avg_reward_std": float(np.std(seed_rewards)),
+            "validity_mean_pct": float(np.mean(seed_validity)),
+            "validity_std_pct": float(np.std(seed_validity)),
+            "low_feas_mean_pct": float(np.mean(seed_low_feas)),
+            "low_feas_std_pct": float(np.std(seed_low_feas)),
+            "p_vs_full": None if np.isnan(p_val) else float(p_val),
+            "significance": sig if sig else ("—" if np.isnan(p_val) else "ns"),
         })
 
     df_table = pd.DataFrame(rows)
     print(df_table.to_markdown(index=False))
     df_table.to_csv("phase4_table1.csv", index=False)
+    pd.DataFrame(seed_level_rows).to_csv("phase4_table1_seedlevel.csv", index=False)
+    with open("phase4_table1.md", "w") as f:
+        f.write(df_table.to_markdown(index=False))
+
+    # Export a readable table figure (avoids blacked-out terminal screenshot artifacts).
+    fig_tbl, ax_tbl = plt.subplots(figsize=(14, 3.5))
+    ax_tbl.axis("off")
+    tbl = pd_table(ax_tbl, df_table, loc="center", cellLoc="left")
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(11)
+    tbl.scale(1.0, 1.8)
+    plt.tight_layout()
+    plt.savefig("phase4_table1.png", dpi=220, bbox_inches="tight")
+    plt.close(fig_tbl)
     print("\nSaved: phase4_table1.csv")
+    print("Saved: phase4_table1_seedlevel.csv")
+    print("Saved: phase4_table1.md")
+    print("Saved: phase4_table1.png")
 
 
 if __name__ == "__main__":
