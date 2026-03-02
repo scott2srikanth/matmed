@@ -193,6 +193,10 @@ def pretrain_s_agent(
 
     # Post-hoc temperature scaling on validation data for calibrated logits.
     if os.path.exists("toxicity_model_raw_head.pt"):
+        if len(val_loader) == 0:
+            logger.warning("Skipping temperature scaling: validation loader is empty.")
+            logger.info("Saved toxicity_model.pt (encoder weights).")
+            return
         model.load_state_dict(torch.load("toxicity_model_raw_head.pt", map_location=device))
         scaler = calibrate_model(model, val_loader, device)
         torch.save(scaler.state_dict(), "safety_temp_scaler.pt")

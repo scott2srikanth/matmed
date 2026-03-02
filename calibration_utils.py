@@ -23,11 +23,14 @@ def calibrate_model(model, val_loader, device):
     optimizer = torch.optim.LBFGS([scaler.temperature], lr=0.01, max_iter=50)
 
     model.eval()
+    has_batches = False
 
     def _closure():
+        nonlocal has_batches
         optimizer.zero_grad()
         total_loss = torch.tensor(0.0, device=device)
         for x, y in val_loader:
+            has_batches = True
             if isinstance(x, (tuple, list)):
                 x = tuple(v.to(device) if torch.is_tensor(v) else v for v in x)
             elif torch.is_tensor(x):
@@ -36,6 +39,10 @@ def calibrate_model(model, val_loader, device):
 
             logits = _forward_with_optional_unpack(model, x)
             total_loss = total_loss + criterion(scaler(logits), y)
+
+        if not has_batches:
+            # No validation batches -> keep default temperature=1.0
+            return total_loss
         total_loss.backward()
         return total_loss
 
