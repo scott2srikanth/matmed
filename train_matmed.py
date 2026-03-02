@@ -368,9 +368,24 @@ class MATMEDRunner:
 
     def _update_policy(self, transitions: List[Transition]) -> Dict[str, float]:
         """Run PPO update over one episode's transitions."""
+        if len(transitions) == 0:
+            return {
+                'policy_loss': 0.0,
+                'value_loss': 0.0,
+                'entropy': 0.0,
+                'total_loss': 0.0,
+                'kl_coef': float(self.kl_coef),
+                'kl': 0.0,
+                'approx_kl': 0.0,
+                'policy_entropy': 0.0,
+            }
+
         rewards = torch.tensor([t.reward for t in transitions], dtype=torch.float, device=self.device)
         old_log_probs = torch.tensor([t.old_log_prob for t in transitions], dtype=torch.float, device=self.device)
         old_action_probs = torch.stack([t.old_action_probs for t in transitions], dim=0).to(self.device)
+        old_action_probs = torch.nan_to_num(old_action_probs, nan=0.25, posinf=0.25, neginf=0.25)
+        old_action_probs = old_action_probs.clamp(min=1e-8)
+        old_action_probs = old_action_probs / old_action_probs.sum(dim=-1, keepdim=True).clamp(min=1e-8)
         actions = torch.tensor([t.action for t in transitions], dtype=torch.long, device=self.device)
         prev_rewards = torch.tensor([t.prev_reward for t in transitions], dtype=torch.float, device=self.device)
         returns = _discount_returns(rewards, gamma=self.gamma)
@@ -395,12 +410,21 @@ class MATMEDRunner:
                 r_batch,
                 reward=prev_rewards,
             )
+            action_probs = torch.nan_to_num(action_probs, nan=0.25, posinf=0.25, neginf=0.25)
+            action_probs = action_probs.clamp(min=1e-8)
+            action_probs = action_probs / action_probs.sum(dim=-1, keepdim=True).clamp(min=1e-8)
             dist = torch.distributions.Categorical(action_probs)
             new_log_probs = dist.log_prob(actions)
             entropy = dist.entropy().mean()
 
             advantages = returns - values.squeeze(-1).detach()
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            adv_mean = advantages.mean()
+            if advantages.numel() > 1:
+                adv_std = advantages.std(unbiased=False).clamp(min=1e-8)
+                advantages = (advantages - adv_mean) / adv_std
+            else:
+                # Single-step rollout: avoid undefined std normalization.
+                advantages = advantages - adv_mean
 
             ratios = torch.exp(new_log_probs - old_log_probs)
             surrogate1 = ratios * advantages
