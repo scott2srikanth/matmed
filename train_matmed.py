@@ -560,8 +560,8 @@ class MATMEDRunner:
 
         # Aggregate metrics
         valid_count  = sum(is_valid_smiles(s) for s in episode_smiles)
-        pct_valid    = 100.0 * valid_count / max(1, max_steps)
-        invalid_count = max_steps - valid_count
+        pct_valid    = 100.0 * valid_count / max(1, len(episode_smiles))
+        invalid_count = len(episode_smiles) - valid_count
         pct_invalid = 100.0 - pct_valid
         avg_reward   = sum(episode_rewards) / max(1, len(episode_rewards))
         diversity    = diversity_score(episode_smiles)

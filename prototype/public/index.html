@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MATMED / Research Console</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" type="module"></script>
+</head>
+<body>
+  <header><a class="brand" href="/">MATMED<span> / RESEARCH CONSOLE</span></a><span class="tag">EXPERIMENTAL · V1</span></header>
+  <main>
+    <section class="intro"><div><p class="eyebrow">01 / GENERATOR FOUNDATIONS</p><h1>Measure first.<br>Optimize second.</h1><p class="lede">Follow molecular grammar training from Colab.<br>Every attempt counts. No filtered validity. No efficacy claims.</p></div><div class="orb" aria-hidden="true"><i></i><i></i><i></i><b>C</b></div></section>
+    <section class="connection"><form id="connect"><label for="token">READ-ONLY ACCESS TOKEN</label><div><input id="token" type="password" autocomplete="off" placeholder="Enter dashboard read token" required><button>Connect to results <span>↗</span></button></div></form><p id="connection-status" role="status">Not connected. Tokens stay in this tab's memory only.</p></section>
+    <section class="workspace">
+      <aside><div class="section-head"><h2>Experiment log</h2><span id="run-count">0 runs</span></div><div id="runs"><p class="muted">Connect to load experiments.</p></div></aside>
+      <article>
+        <div class="section-head"><div><p class="eyebrow" id="run-kind">AWAITING DATA</p><h2 id="run-title">No experiment selected</h2></div><span class="tag" id="run-status">OFFLINE</span></div>
+        <div id="warning" class="notice">Software smoke tests verify execution only. Research runs require a documented real corpus. Neither establishes drug efficacy or safety.</div>
+        <div class="metrics"><div><span>RAW VALIDITY</span><strong id="validity">—</strong><small>All generated attempts</small></div><div><span>PRIOR KL</span><strong id="kl">—</strong><small>On PPO rollout prefixes</small></div><div><span>MEAN REWARD</span><strong id="reward">—</strong><small>Validity-only objective</small></div></div>
+        <div class="chart-head"><h3>Grammar trajectory</h3><span>Raw validity / %</span></div>
+        <svg id="chart" viewBox="0 0 720 240" role="img" aria-label="Raw SMILES validity over recorded checkpoints"></svg>
+        <p class="muted" id="chart-caption">Measured values appear here after an upload. Empty space is not zero.</p>
+        <div class="details"><div><h3>Evidence boundary</h3><p id="limitations">Binding, safety, reaction and vision validation are separate next-stage work. Existing agents are retained.</p></div><div><h3>Run provenance</h3><p id="provenance">No report loaded.</p><button id="download" disabled>Download report ↓</button></div></div>
+      </article>
+    </section>
+    <footer>MATMED / VALIDITY-FIRST PROTOTYPE <span>Colab compute → authenticated API → research record</span></footer>
+  </main>
+</body>
+</html>

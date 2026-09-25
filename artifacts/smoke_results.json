@@ -1,0 +1,91 @@
+{
+  "software_validation_only": true,
+  "mode": "smoke",
+  "training": "2 fixture pretraining epochs and 1 PPO iteration per seed",
+  "runtime": "CPU",
+  "results": [
+    {
+      "seed": 42,
+      "report_path": "runs/verified/matmed-42-42a39d8e61b2/report.json",
+      "run_id": "matmed-42-42a39d8e61b2",
+      "status": "completed",
+      "source_sha256": "0e88e7fd37776987eaffef354cee428f843f2d772ae3ec00026bdbf12a5ab294",
+      "metrics": {
+        "raw_validity_pct": 0.0,
+        "attempts": 16,
+        "valid_count": 0,
+        "mean_reward": -2.0,
+        "reward_variance": 0.0,
+        "policy_loss": -0.0,
+        "loss": 0.4342077970504761,
+        "prior_kl": 3.7058001112200145e-07,
+        "rollout_kl": 3.385126206012501e-07,
+        "entropy": 3.3707125186920166,
+        "grad_norm": 0.9662660360336304,
+        "kl_coef_used": 0.1,
+        "next_kl_coef": 0.08000000000000002,
+        "ppo_epochs": 4,
+        "uniqueness_pct": 0.0,
+        "novelty_pct": 0.0
+      },
+      "api_roundtrip_verified": true
+    },
+    {
+      "seed": 123,
+      "report_path": "runs/verified/matmed-123-d372276b28ed/report.json",
+      "run_id": "matmed-123-d372276b28ed",
+      "status": "completed",
+      "source_sha256": "0e88e7fd37776987eaffef354cee428f843f2d772ae3ec00026bdbf12a5ab294",
+      "metrics": {
+        "raw_validity_pct": 0.0,
+        "attempts": 16,
+        "valid_count": 0,
+        "mean_reward": -2.0,
+        "reward_variance": 0.0,
+        "policy_loss": -0.0,
+        "loss": 0.4700753390789032,
+        "prior_kl": 2.94509760578876e-07,
+        "rollout_kl": 3.085055197971087e-07,
+        "entropy": 3.369826078414917,
+        "grad_norm": 0.9305792450904846,
+        "kl_coef_used": 0.1,
+        "next_kl_coef": 0.08000000000000002,
+        "ppo_epochs": 4,
+        "uniqueness_pct": 0.0,
+        "novelty_pct": 0.0
+      },
+      "api_roundtrip_verified": true
+    },
+    {
+      "seed": 999,
+      "report_path": "runs/verified/matmed-999-40273d5e0c2d/report.json",
+      "run_id": "matmed-999-40273d5e0c2d",
+      "status": "completed",
+      "source_sha256": "0e88e7fd37776987eaffef354cee428f843f2d772ae3ec00026bdbf12a5ab294",
+      "metrics": {
+        "raw_validity_pct": 0.0,
+        "attempts": 16,
+        "valid_count": 0,
+        "mean_reward": -2.0,
+        "reward_variance": 0.0,
+        "policy_loss": -0.0,
+        "loss": 0.5173130035400391,
+        "prior_kl": 2.311466573701182e-07,
+        "rollout_kl": 2.2521255971241771e-07,
+        "entropy": 3.394754648208618,
+        "grad_norm": 1.0003379583358765,
+        "kl_coef_used": 0.1,
+        "next_kl_coef": 0.08000000000000002,
+        "ppo_epochs": 4,
+        "uniqueness_pct": 0.0,
+        "novelty_pct": 0.0
+      },
+      "api_roundtrip_verified": true
+    }
+  ],
+  "limitations": [
+    "Not a real-data experiment",
+    "Not drug-discovery validation",
+    "No claimed improvement in molecular validity"
+  ]
+}

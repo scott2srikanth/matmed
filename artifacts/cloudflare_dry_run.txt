@@ -1,0 +1,12 @@
+
+ ⛅️ wrangler 4.140.0
+────────────────────
+✨ Read 4 files from the assets directory /Users/srikanthreddy/Documents/Bolt App/matmed/prototype/public
+Total Upload: 5.04 KiB / gzip: 1.93 KiB
+Your Worker has access to the following bindings:
+Binding                                                Resource
+env.RUNS (REPLACE_WITH_KV_NAMESPACE_ID)                KV Namespace
+env.ASSETS                                             Assets
+env.ALLOWED_ORIGIN ("")                                Environment Variable
+
+--dry-run: exiting now.

@@ -30,14 +30,14 @@ class CriticCalibrator:
             self.temp[name] = float(torch.clamp(torch.tensor(self.temp[name]), 0.1, 10.0))
 
     def calibrate_binding(self, raw: torch.Tensor) -> torch.Tensor:
-        # Assume regression output where lower affinity proxy can be better.
-        scaled = -raw / self.temp["bind"]
+        # RewardAggregator receives higher-is-better normalized binding scores.
+        scaled = raw / self.temp["bind"]
         self.adapt_temperature("bind", scaled)
         return torch.tanh(scaled)
 
     def calibrate_safety(self, logits: torch.Tensor) -> torch.Tensor:
-        # Positive safety risk should be penalized.
-        scaled = -logits / self.temp["safety"]
+        # The interface receives ADMET minus toxicity, not raw toxicity logits.
+        scaled = logits / self.temp["safety"]
         self.adapt_temperature("safety", scaled)
         return torch.tanh(scaled)
 

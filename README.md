@@ -1,5 +1,18 @@
 # MATMED: Multi-Agent Transformer for Molecular Evolution & Design
 
+## Start here: validity-first workflow
+
+Use `matmed_validity_colab.ipynb` and `artifacts/matmed_colab_bundle.zip` for the
+new tested workflow. Upload the notebook to Colab, then upload the source bundle
+when its setup cell prompts. See `VALIDITY_WORKFLOW.md` and `prototype/README.md`.
+
+**Evidence boundary:** the older Phase 4 loaders use synthetic/proxy labels and
+the old notebook is a legacy experiment, not a validated drug-discovery system.
+The historical architecture descriptions below describe intended roles, not
+verified training-data provenance or experimental performance. Simulated videos
+do not establish physical feasibility. The new workflow tests raw molecular
+validity first; it does not run drug-efficacy claims or ablation significance tests.
+
 ![MATMED Architecture](https://img.shields.io/badge/Status-Research%20Prototype-blue) 
 ![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=flat&logo=pytorch&logoColor=white)
 

@@ -1,0 +1,22 @@
+test_binding_and_safety_reward_directions (test_validity_pipeline.PipelineTests.test_binding_and_safety_reward_directions) ... ok
+test_calibration_freezes_critic_and_reduces_heldout_nll (test_validity_pipeline.PipelineTests.test_calibration_freezes_critic_and_reduces_heldout_nll) ... ok
+test_connector_rejects_insecure_remote (test_validity_pipeline.PipelineTests.test_connector_rejects_insecure_remote) ... ok
+test_no_random_split_fallback (test_validity_pipeline.PipelineTests.test_no_random_split_fallback) ... ok
+test_normalizer_retains_between_batch_variance (test_validity_pipeline.PipelineTests.test_normalizer_retains_between_batch_variance) ... ok
+test_pic50_is_not_double_transformed (test_validity_pipeline.PipelineTests.test_pic50_is_not_double_transformed) ... ok
+test_ppo_changes_generator_and_preserves_frozen_prior (test_validity_pipeline.PipelineTests.test_ppo_changes_generator_and_preserves_frozen_prior) ... ok
+test_raw_validity_denominator (test_validity_pipeline.PipelineTests.test_raw_validity_denominator) ... ok
+test_real_corpus_dedup_vocab_and_scaffold_isolation (test_validity_pipeline.PipelineTests.test_real_corpus_dedup_vocab_and_scaffold_isolation) ... ok
+test_research_gate_blocks_ppo_below_raw_validity_threshold (test_validity_pipeline.PipelineTests.test_research_gate_blocks_ppo_below_raw_validity_threshold) ... Binding target mean/std: 7.0 2.0
+Binding target mean/std: 7.0 0.0
+Pretraining 1/1: validation NLL=3.0142
+REPORT_PATH=/var/folders/5l/m8_sj6b5203g2d42ty0fxb6w0000gn/T/tmp7duhhglq/matmed-42-2d2241140b9e/report.json
+ok
+test_rollout_replay_probabilities_agree (test_validity_pipeline.PipelineTests.test_rollout_replay_probabilities_agree) ... ok
+test_singleton_and_all_invalid_batches_are_finite (test_validity_pipeline.PipelineTests.test_singleton_and_all_invalid_batches_are_finite) ... ok
+test_topk_larger_than_vocabulary_and_special_tokens (test_validity_pipeline.PipelineTests.test_topk_larger_than_vocabulary_and_special_tokens) ... ok
+
+----------------------------------------------------------------------
+Ran 13 tests in 0.953s
+
+OK

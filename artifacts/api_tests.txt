@@ -1,0 +1,12 @@
+✔ upload, list and retrieve a real-shaped run report (10.0415ms)
+✔ separate read and write credentials and reject missing configuration (0.429917ms)
+✔ reject invalid metrics, invalid JSON, oversized body and cross-origin (1.569166ms)
+✔ same-origin CORS, missing reports, health and static dashboard (0.234042ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 42.064792

@@ -19,7 +19,7 @@ from data_utils import load_bindingdb_sample, scaffold_split
 logger = get_logger('E-Agent Pretrain')
 
 class BindingDataset(Dataset):
-    def __init__(self, data_tuples: list):
+    def __init__(self, data_tuples: list, target_range=None):
         self.data = []
         raw_targets = []
         for smi, target in data_tuples:
@@ -33,12 +33,12 @@ class BindingDataset(Dataset):
             self.y_min, self.y_max = 0.0, 1.0
             return
 
-        # Log-transform to p-like scale: y = -log10(raw + eps)
-        self.y = -np.log10(np.array(raw_targets, dtype=np.float64) + 1e-12)
+        # This loader already returns pIC50. Applying another log reverses ranking.
+        self.y = np.array(raw_targets, dtype=np.float64)
         print("Binding target mean/std:", float(self.y.mean()), float(self.y.std()))
 
         # Normalize transformed targets to [0,1] for stable regression.
-        self.y_min, self.y_max = self.y.min(), self.y.max()
+        self.y_min, self.y_max = target_range or (self.y.min(), self.y.max())
         for i in range(len(self.data)):
             norm_pic50 = (self.y[i] - self.y_min) / (self.y_max - self.y_min + 1e-8)
             self.data[i] = (self.data[i][0], norm_pic50)
@@ -137,8 +137,8 @@ def pretrain_e_agent(
     test_raw = [raw_data[i] for i in test_idx]
 
     train_ds = BindingDataset(train_raw)
-    val_ds = BindingDataset(val_raw)
-    test_ds = BindingDataset(test_raw)
+    val_ds = BindingDataset(val_raw, (train_ds.y_min, train_ds.y_max))
+    test_ds = BindingDataset(test_raw, (train_ds.y_min, train_ds.y_max))
     
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_graphs)
     val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False, collate_fn=collate_graphs)

@@ -117,7 +117,14 @@ class GeneratorAgent(nn.Module):
         self.ln = nn.LayerNorm(d_model)
 
         self._init_weights()
-        self._freeze_lower_layers()
+
+    def prepare_finetuning(self) -> None:
+        """Freeze the prior's lower layers only AFTER supervised pretraining."""
+        for param in self.parameters():
+            param.requires_grad = False
+        for layer in self.transformer.layers[len(self.transformer.layers) // 2:]:
+            layer.requires_grad_(True)
+        self.output_proj.requires_grad_(True)
 
     def _freeze_lower_layers(self) -> None:
         """Freeze the bottom 50% of the transformer layers to preserve grammar."""
@@ -181,7 +188,7 @@ class GeneratorAgent(nn.Module):
         batch_size: int = 1,
         temperature: float = 1.0,
         top_k: int = 0,
-        min_len: int = 8,
+        min_len: int = 1,
         device: Optional[torch.device] = None,
     ) -> Tuple[list, torch.Tensor]:
         """
@@ -199,6 +206,8 @@ class GeneratorAgent(nn.Module):
         """
         if device is None:
             device = next(self.parameters()).device
+        if temperature <= 0 or batch_size < 1:
+            raise ValueError("temperature and batch_size must be positive")
 
         self.eval()
         sos = self.tokenizer.sos_idx
@@ -223,10 +232,7 @@ class GeneratorAgent(nn.Module):
             # Sample next token from last position
             next_logits = logits[:, -1, :] / temperature  # (B, vocab)
 
-            if top_k > 0:
-                k = min(top_k, next_logits.size(-1))
-                topk_vals = next_logits.topk(k, dim=-1).values[:, -1:]
-                next_logits = next_logits.masked_fill(next_logits < topk_vals, -float('inf'))
+            next_logits[:, [pad, sos, self.tokenizer.unk_idx]] = -float('inf')
 
             for i in range(batch_size):
                 if finished[i]:
@@ -254,18 +260,15 @@ class GeneratorAgent(nn.Module):
                 ):
                     next_logits[i, close_paren_idx] = -float('inf')
 
-                # Grammar mask 2: prevent overusing a ring index (>2 usually invalid).
-                for d, idx_d in ring_digit_indices.items():
-                    if ring_counts[d] >= 2:
-                        next_logits[i, idx_d] = -float('inf')
-                # Prevent consecutive ring digits.
-                if len(toks) > 0 and self.tokenizer.idx2char.get(toks[-1], '').isdigit():
-                    for idx_d in ring_digit_indices.values():
-                        next_logits[i, idx_d] = -float('inf')
-
                 # Avoid too-short sequences ending immediately.
-                if sequences.size(1) < min_len:
+                if sequences.size(1) <= min_len:
                     next_logits[i, eos] = -float('inf')
+
+            # Mask first: filtering first can leave no legal sampling support.
+            if top_k > 0:
+                k = min(top_k, next_logits.size(-1))
+                cutoff = next_logits.topk(k, dim=-1).values[:, -1:]
+                next_logits = next_logits.masked_fill(next_logits < cutoff, -float('inf'))
 
             probs = F.softmax(next_logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1)  # (B, 1)

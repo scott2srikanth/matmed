@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.dev.vars
+node_modules/
+.wrangler/
+runs/
+datasets/
+*.pt
+*.npz
+artifacts/worker-build/
